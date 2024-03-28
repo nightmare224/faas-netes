@@ -244,9 +244,13 @@ func runController(setup []serverSetup) {
 	functionLookup := k8s.NewFunctionLookup(config.DefaultFunctionNamespace, listers.EndpointsInformer.Lister())
 	functionList := k8s.NewFunctionList(config.DefaultFunctionNamespace, deployLister)
 
+	// for external cluster
 	deployListers := make([]v1appslisters.DeploymentLister, len(setup))
 	deployListers[0] = deployLister
-
+	functionLookupInterfaces := make([]proxy.BaseURLResolver, len(setup))
+	functionLookupInterfaces[0] = functionLookup
+	//functionLists := make([]*k8s.FunctionList, len(setup))
+	//functionLists[0] = functionList
 	// external cluster
 	for i := 1; i < len(setup); i++ {
 		// stopCh := signals.SetupSignalHandler()
@@ -255,12 +259,15 @@ func runController(setup []serverSetup) {
 		deployListers[i] = externalListers.DeploymentInformer.Lister()
 		// externalFunctionList := k8s.NewFunctionList(config.DefaultFunctionNamespace, deployLister)
 		// fmt.Println(externalFunctionList)
+		functionLookupInterfaces[i] = k8s.NewFunctionLookup(setup[i].config.DefaultFunctionNamespace, externalListers.EndpointsInformer.Lister())
+		//functionLists[i] = k8s.NewFunctionList(config.DefaultFunctionNamespace, deployListers[i])
 	}
 
 	// create a handle a pass the config into, so the closure can hold the config
 	printFunctionExecutionTime := true
 	bootstrapHandlers := providertypes.FaaSHandlers{
-		FunctionProxy:  proxy.NewHandlerFunc(config.FaaSConfig, functionLookup, printFunctionExecutionTime),
+		// FunctionProxy:  proxy.NewHandlerFunc(config.FaaSConfig, functionLookupInterfaces, printFunctionExecutionTime),
+		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, functionLookupInterfaces, printFunctionExecutionTime, deployListers, factory),
 		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, kubeClient),
 		// deploy on local cluster (index[0])
 		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, factory, functionList),

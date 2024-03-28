@@ -30,7 +30,7 @@ const initialReplicasCount = 1
 
 // MakeDeployHandler creates a handler to create new functions in the cluster
 func MakeDeployHandler(functionNamespace string, factory k8s.FunctionFactory, functionList *k8s.FunctionList) http.HandlerFunc {
-	secrets := k8s.NewSecretsClient(factory.Client)
+	// secrets := k8s.NewSecretsClient(factory.Client)
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -64,69 +64,136 @@ func MakeDeployHandler(functionNamespace string, factory k8s.FunctionFactory, fu
 			return
 		}
 
-		existingSecrets, err := secrets.GetSecrets(namespace, request.Secrets)
+		// call function here
+		err, httpStatusCode := makeFunction(namespace, factory, functionList, request)
 		if err != nil {
-			wrappedErr := fmt.Errorf("unable to fetch secrets: %s", err.Error())
-			http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
+			http.Error(w, err.Error(), httpStatusCode)
 			return
 		}
+		w.WriteHeader(httpStatusCode)
 
-		if err := isAnonymous(request.Image); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+		// existingSecrets, err := secrets.GetSecrets(namespace, request.Secrets)
+		// if err != nil {
+		// 	wrappedErr := fmt.Errorf("unable to fetch secrets: %s", err.Error())
+		// 	http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
+		// 	return
+		// }
 
-		deploymentSpec, specErr := makeDeploymentSpec(request, existingSecrets, factory)
-		if specErr != nil {
-			wrappedErr := fmt.Errorf("failed create Deployment spec: %s", specErr.Error())
-			log.Println(wrappedErr)
-			http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
-			return
-		}
+		// if err := isAnonymous(request.Image); err != nil {
+		// 	http.Error(w, err.Error(), http.StatusBadRequest)
+		// 	return
+		// }
 
-		count, err := functionList.Count()
-		if err != nil {
-			err := fmt.Errorf("unable to count functions: %s", err.Error())
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		// deploymentSpec, specErr := makeDeploymentSpec(request, existingSecrets, factory)
+		// if specErr != nil {
+		// 	wrappedErr := fmt.Errorf("failed create Deployment spec: %s", specErr.Error())
+		// 	log.Println(wrappedErr)
+		// 	http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
+		// 	return
+		// }
 
-		if count+1 > MaxFunctions {
-			err := fmt.Errorf("unable to create function, maximum: %d, visit https://openfaas.com/pricing to upgrade to OpenFaaS Standard", MaxFunctions)
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+		// count, err := functionList.Count()
+		// if err != nil {
+		// 	err := fmt.Errorf("unable to count functions: %s", err.Error())
+		// 	http.Error(w, err.Error(), http.StatusInternalServerError)
+		// 	return
+		// }
 
-		deploy := factory.Client.AppsV1().Deployments(namespace)
-		if _, err = deploy.Create(context.TODO(), deploymentSpec, metav1.CreateOptions{}); err != nil {
-			wrappedErr := fmt.Errorf("unable create Deployment: %s", err.Error())
-			log.Println(wrappedErr)
-			http.Error(w, wrappedErr.Error(), http.StatusInternalServerError)
-			return
-		}
+		// if count+1 > MaxFunctions {
+		// 	err := fmt.Errorf("unable to create function, maximum: %d, visit https://openfaas.com/pricing to upgrade to OpenFaaS Standard", MaxFunctions)
+		// 	http.Error(w, err.Error(), http.StatusBadRequest)
+		// 	return
+		// }
 
-		log.Printf("Deployment created: %s.%s\n", request.Service, namespace)
+		// deploy := factory.Client.AppsV1().Deployments(namespace)
+		// if _, err = deploy.Create(context.TODO(), deploymentSpec, metav1.CreateOptions{}); err != nil {
+		// 	wrappedErr := fmt.Errorf("unable create Deployment: %s", err.Error())
+		// 	log.Println(wrappedErr)
+		// 	http.Error(w, wrappedErr.Error(), http.StatusInternalServerError)
+		// 	return
+		// }
 
-		service := factory.Client.CoreV1().Services(namespace)
-		serviceSpec, err := makeServiceSpec(request, factory)
-		if err != nil {
-			wrappedErr := fmt.Errorf("failed create Service spec: %s", err.Error())
-			log.Println(wrappedErr)
-			http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
-			return
-		}
+		// log.Printf("Deployment created: %s.%s\n", request.Service, namespace)
 
-		if _, err = service.Create(context.TODO(), serviceSpec, metav1.CreateOptions{}); err != nil {
-			wrappedErr := fmt.Errorf("failed create Service: %s", err.Error())
-			log.Println(wrappedErr)
-			http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
-			return
-		}
+		// service := factory.Client.CoreV1().Services(namespace)
+		// serviceSpec, err := makeServiceSpec(request, factory)
+		// if err != nil {
+		// 	wrappedErr := fmt.Errorf("failed create Service spec: %s", err.Error())
+		// 	log.Println(wrappedErr)
+		// 	http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
+		// 	return
+		// }
 
-		log.Printf("Service created: %s.%s\n", request.Service, namespace)
+		// if _, err = service.Create(context.TODO(), serviceSpec, metav1.CreateOptions{}); err != nil {
+		// 	wrappedErr := fmt.Errorf("failed create Service: %s", err.Error())
+		// 	log.Println(wrappedErr)
+		// 	http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
+		// 	return
+		// }
 
-		w.WriteHeader(http.StatusAccepted)
+		// log.Printf("Service created: %s.%s\n", request.Service, namespace)
+
+		// w.WriteHeader(http.StatusAccepted)
 	}
+}
+
+func makeFunction(namespace string, factory k8s.FunctionFactory, functionList *k8s.FunctionList, function types.FunctionDeployment) (error, int) {
+
+	secrets := k8s.NewSecretsClient(factory.Client)
+	existingSecrets, err := secrets.GetSecrets(namespace, function.Secrets)
+	if err != nil {
+		wrappedErr := fmt.Errorf("unable to fetch secrets: %s", err.Error())
+		return wrappedErr, http.StatusBadRequest
+	}
+
+	if err := isAnonymous(function.Image); err != nil {
+		return err, http.StatusBadRequest
+	}
+
+	deploymentSpec, specErr := makeDeploymentSpec(function, existingSecrets, factory)
+	if specErr != nil {
+		wrappedErr := fmt.Errorf("failed create Deployment spec: %s", specErr.Error())
+		log.Println(wrappedErr)
+		return wrappedErr, http.StatusBadRequest
+	}
+
+	count, err := functionList.Count()
+	if err != nil {
+		err := fmt.Errorf("unable to count functions: %s", err.Error())
+		return err, http.StatusInternalServerError
+	}
+
+	if count+1 > MaxFunctions {
+		err := fmt.Errorf("unable to create function, maximum: %d, visit https://openfaas.com/pricing to upgrade to OpenFaaS Standard", MaxFunctions)
+		return err, http.StatusBadRequest
+	}
+
+	deploy := factory.Client.AppsV1().Deployments(namespace)
+	if _, err = deploy.Create(context.TODO(), deploymentSpec, metav1.CreateOptions{}); err != nil {
+		wrappedErr := fmt.Errorf("unable create Deployment: %s", err.Error())
+		log.Println(wrappedErr)
+		return wrappedErr, http.StatusInternalServerError
+	}
+
+	log.Printf("Deployment created: %s.%s\n", function.Service, namespace)
+
+	service := factory.Client.CoreV1().Services(namespace)
+	serviceSpec, err := makeServiceSpec(function, factory)
+	if err != nil {
+		wrappedErr := fmt.Errorf("failed create Service spec: %s", err.Error())
+		log.Println(wrappedErr)
+		return wrappedErr, http.StatusBadRequest
+	}
+
+	if _, err = service.Create(context.TODO(), serviceSpec, metav1.CreateOptions{}); err != nil {
+		wrappedErr := fmt.Errorf("failed create Service: %s", err.Error())
+		log.Println(wrappedErr)
+		return wrappedErr, http.StatusBadRequest
+	}
+
+	log.Printf("Service created: %s.%s\n", function.Service, namespace)
+
+	return nil, http.StatusAccepted
 }
 
 func makeDeploymentSpec(request types.FunctionDeployment, existingSecrets map[string]*corev1.Secret, factory k8s.FunctionFactory) (*appsv1.Deployment, error) {
