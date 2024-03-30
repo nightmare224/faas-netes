@@ -10,8 +10,11 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	clientset "github.com/openfaas/faas-netes/pkg/client/clientset/versioned"
@@ -87,13 +90,13 @@ func main() {
 				return err
 			}
 			fi, _ := os.Lstat(path)
-			if (fi.Mode()&fs.ModeSymlink != 0) && !d.IsDir() {
+			if (fi.Mode()&fs.ModeSymlink == 0) && !d.IsDir() {
 				config, err := clientcmd.BuildConfigFromFlags("", path)
 				if err != nil {
 					log.Fatalf("Error building kubeconfig: %s", err.Error())
 				}
 				clientCmdConfigs = append(clientCmdConfigs, config)
-				// fmt.Printf("Host: %s, APIPath: %s\n", clientCmdConfigs[i].Host, clientCmdConfigs[i].APIPath)
+				fmt.Printf("Host: %s, APIPath: %s\n", clientCmdConfigs[len(clientCmdConfigs)-1].Host, clientCmdConfigs[len(clientCmdConfigs)-1].APIPath)
 			}
 
 			return nil
@@ -101,6 +104,8 @@ func main() {
 		if err != nil {
 			log.Fatalf("Error building kubeconfig path: %s", err.Error())
 		}
+		clientCmdConfigs = measureRTT(clientCmdConfigs)
+
 	} else {
 		config, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
 		if err != nil {
@@ -108,7 +113,7 @@ func main() {
 		}
 		clientCmdConfigs = append(clientCmdConfigs, config)
 	}
-
+	fmt.Println("ClientCmdConfigs len:", len(clientCmdConfigs))
 	// debug
 	// fmt.Printf("debug msg, masterURL: %s", masterURL)
 	// fmt.Printf("debug msg, APIPath: %s, Host: %s\n", clientCmdConfig.APIPath, clientCmdConfig.Host)
@@ -203,6 +208,44 @@ type customInformers struct {
 	FunctionsInformer  v1.FunctionInformer
 }
 
+func measureRTT(clientCmdConfigs []*rest.Config) []*rest.Config {
+
+	var sortedRTTConfig []*rest.Config
+	// check if there is local cluster
+	kubeconfig, err := rest.InClusterConfig()
+
+	localhost := ""
+	if err == nil {
+		sortedRTTConfig = append(sortedRTTConfig, kubeconfig)
+		localhost = kubeconfig.Host
+		fmt.Println("Localhost Cluster IP: ", localhost)
+	}
+	RTTtoIdx := make(map[time.Duration]int)
+	var RTTs []time.Duration
+	for idx, config := range clientCmdConfigs {
+		// ignore the localhost config as it is already added
+
+		if config.Host != localhost {
+			startTime := time.Now()
+			parsedURL, _ := url.Parse(config.Host)
+			// fmt.Println(config.Host, parsedURL.Host)
+			conn, err := net.DialTimeout("tcp", parsedURL.Host, 5*time.Second)
+			if err != nil {
+				fmt.Printf("Measure RTT TCP connection error: %s", err.Error())
+			}
+			rtt := time.Since(startTime)
+			conn.Close()
+			RTTtoIdx[rtt] = idx
+			RTTs = append(RTTs, rtt)
+		}
+	}
+	slices.Sort(RTTs)
+	for _, rtt := range RTTs {
+		sortedRTTConfig = append(sortedRTTConfig, clientCmdConfigs[RTTtoIdx[rtt]])
+	}
+
+	return sortedRTTConfig
+}
 func startInformers(setup serverSetup, stopCh <-chan struct{}, operator bool) customInformers {
 	// assume the index 0 is the local cluster
 	kubeInformerFactory := setup.kubeInformerFactory

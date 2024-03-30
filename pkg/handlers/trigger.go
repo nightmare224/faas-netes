@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -28,7 +29,10 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 				if function != nil {
 					// function already in local
 					if i == 0 {
+						fmt.Printf("The function %s is already deployed in the targeted cluster.\n", functionName)
 						break
+					} else {
+						fmt.Printf("The function %s is found in cluster %d.\n", functionName, i)
 					}
 					deployment := types.FunctionDeployment{
 						Service:                function.Name,
@@ -55,7 +59,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 			}
 		}
 
-		// The original handler
+		// The original handler, still only on local
 		proxy.NewHandlerFunc(config, resolver, verbose)(w, r)
 	}
 
