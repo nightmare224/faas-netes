@@ -8,8 +8,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	clientset "github.com/openfaas/faas-netes/pkg/client/clientset/versioned"
@@ -78,19 +80,26 @@ func main() {
 
 	var clientCmdConfigs []*rest.Config
 	if kubeconfigPath != "" {
-		entries, err := os.ReadDir(kubeconfigPath)
+		// entries, err := os.ReadDir(kubeconfigPath)
+
+		err := filepath.WalkDir(kubeconfigPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			fi, _ := os.Lstat(path)
+			if (fi.Mode()&fs.ModeSymlink != 0) && !d.IsDir() {
+				config, err := clientcmd.BuildConfigFromFlags("", path)
+				if err != nil {
+					log.Fatalf("Error building kubeconfig: %s", err.Error())
+				}
+				clientCmdConfigs = append(clientCmdConfigs, config)
+				// fmt.Printf("Host: %s, APIPath: %s\n", clientCmdConfigs[i].Host, clientCmdConfigs[i].APIPath)
+			}
+
+			return nil
+		})
 		if err != nil {
 			log.Fatalf("Error building kubeconfig path: %s", err.Error())
-		}
-
-		for i, e := range entries {
-			kubeconfig := kubeconfigPath + e.Name()
-			config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-			if err != nil {
-				log.Fatalf("Error building kubeconfig: %s", err.Error())
-			}
-			clientCmdConfigs = append(clientCmdConfigs, config)
-			fmt.Printf("Host: %s, APIPath: %s\n", clientCmdConfigs[i].Host, clientCmdConfigs[i].APIPath)
 		}
 	} else {
 		config, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
