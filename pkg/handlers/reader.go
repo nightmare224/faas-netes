@@ -74,18 +74,23 @@ func getServiceList(functionNamespace string, deploymentListers []v1.DeploymentL
 	}
 	onlyFunctions := sel.Add(*req)
 
+	functionnameSet := make(map[string]struct{})
 	for _, deploymentLister := range deploymentListers {
 		res, err := deploymentLister.Deployments(functionNamespace).List(onlyFunctions)
 
 		if err != nil {
 			return nil, err
 		}
-
 		for _, item := range res {
 			if item != nil {
+				// ignore if the function already is listed by closet cluster
+				if _, exist := functionnameSet[item.Name]; exist {
+					continue
+				}
 				function := k8s.AsFunctionStatus(*item)
 				if function != nil {
 					functions = append(functions, *function)
+					functionnameSet[item.Name] = struct{}{}
 				}
 			}
 		}

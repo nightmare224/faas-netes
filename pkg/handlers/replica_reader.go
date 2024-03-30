@@ -28,7 +28,7 @@ const MaxReplicas = 5
 const MaxFunctions = 15
 
 // MakeReplicaReader reads the amount of replicas for a deployment
-func MakeReplicaReader(defaultNamespace string, lister v1.DeploymentLister) http.HandlerFunc {
+func MakeReplicaReader(defaultNamespace string, listers []v1.DeploymentLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		vars := mux.Vars(r)
@@ -50,32 +50,33 @@ func MakeReplicaReader(defaultNamespace string, lister v1.DeploymentLister) http
 
 		s := time.Now()
 
-		function, err := getService(lookupNamespace, functionName, lister)
-		if err != nil {
-			log.Printf("Unable to fetch service: %s %s\n", functionName, namespace)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
+		for _, lister := range listers {
+			function, err := getService(lookupNamespace, functionName, lister)
+			if err != nil {
+				log.Printf("Unable to fetch service: %s %s\n", functionName, namespace)
+				continue
+			}
+			// find function, always only list the closetest cluster
+			if function != nil {
+				d := time.Since(s)
+				log.Printf("Replicas: %s.%s, (%d/%d) %dms\n", functionName, lookupNamespace, function.AvailableReplicas, function.Replicas, d.Milliseconds())
+
+				functionBytes, err := json.Marshal(function)
+				if err != nil {
+					klog.Errorf("Failed to marshal function: %s", err.Error())
+					w.WriteHeader(http.StatusInternalServerError)
+					w.Write([]byte("Failed to marshal function"))
+					return
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write(functionBytes)
+				return
+			}
 		}
-
-		if function == nil {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-
-		d := time.Since(s)
-		log.Printf("Replicas: %s.%s, (%d/%d) %dms\n", functionName, lookupNamespace, function.AvailableReplicas, function.Replicas, d.Milliseconds())
-
-		functionBytes, err := json.Marshal(function)
-		if err != nil {
-			klog.Errorf("Failed to marshal function: %s", err.Error())
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Failed to marshal function"))
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(functionBytes)
+		// did not found anything so return 404
+		w.WriteHeader(http.StatusNotFound)
 	}
 }
 

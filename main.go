@@ -324,7 +324,7 @@ func runController(setup []serverSetup) {
 		// deploy on local cluster (index[0])
 		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, factory, functionList),
 		FunctionLister: handlers.MakeFunctionReader(config.DefaultFunctionNamespace, deployListers),
-		FunctionStatus: handlers.MakeReplicaReader(config.DefaultFunctionNamespace, deployLister),
+		FunctionStatus: handlers.MakeReplicaReader(config.DefaultFunctionNamespace, deployListers),
 		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, kubeClient),
 		UpdateFunction: handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, factory),
 		Health:         handlers.MakeHealthHandler(),
