@@ -235,8 +235,13 @@ func measureRTT(clientCmdConfigs []*rest.Config) []*rest.Config {
 			}
 			rtt := time.Since(startTime)
 			conn.Close()
+			// for testing
+			// if config.Host == "https://10.211.55.25:6443" {
+			// 	rtt = 0
+			// }
 			RTTtoIdx[rtt] = idx
 			RTTs = append(RTTs, rtt)
+			// fmt.Println("RTT: ", rtt, "URL: ", config.Host)
 		}
 	}
 	slices.Sort(RTTs)
@@ -294,6 +299,7 @@ func runController(setup []serverSetup) {
 	handlers.RegisterEventHandlers(listers.DeploymentInformer, kubeClient, config.DefaultFunctionNamespace)
 	deployLister := listers.DeploymentInformer.Lister()
 	functionLookup := k8s.NewFunctionLookup(config.DefaultFunctionNamespace, listers.EndpointsInformer.Lister())
+	// functionLookup := k8s.NewFunctionLookupRemote(kubeClient) //should also use remote resover if it is not in localhost cluster
 	functionList := k8s.NewFunctionList(config.DefaultFunctionNamespace, deployLister)
 
 	// for external cluster
@@ -309,17 +315,14 @@ func runController(setup []serverSetup) {
 		operator := false
 		externalListers := startInformers(setup[i], stopCh, operator)
 		deployListers[i] = externalListers.DeploymentInformer.Lister()
-		// externalFunctionList := k8s.NewFunctionList(config.DefaultFunctionNamespace, deployLister)
-		// fmt.Println(externalFunctionList)
-		functionLookupInterfaces[i] = k8s.NewFunctionLookup(setup[i].config.DefaultFunctionNamespace, externalListers.EndpointsInformer.Lister())
-		//functionLists[i] = k8s.NewFunctionList(config.DefaultFunctionNamespace, deployListers[i])
+		functionLookupInterfaces[i] = k8s.NewFunctionLookupRemote(setup[i].kubeClient)
 	}
 
 	// create a handle a pass the config into, so the closure can hold the config
-	printFunctionExecutionTime := true
+	// printFunctionExecutionTime := true
 	bootstrapHandlers := providertypes.FaaSHandlers{
 		// FunctionProxy:  proxy.NewHandlerFunc(config.FaaSConfig, functionLookupInterfaces, printFunctionExecutionTime),
-		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, functionLookupInterfaces, printFunctionExecutionTime, deployListers, factory),
+		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, functionLookupInterfaces, deployListers, factory),
 		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, kubeClient),
 		// deploy on local cluster (index[0])
 		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, factory, functionList),
