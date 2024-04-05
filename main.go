@@ -291,6 +291,16 @@ func startInformers(setup serverSetup, stopCh <-chan struct{}, operator bool) cu
 		FunctionsInformer:  functions,
 	}
 }
+func startServiceInformers(setup serverSetup, stopCh <-chan struct{}) v1core.ServiceInformer {
+	kubeInformerFactory := setup.kubeInformerFactory
+	services := kubeInformerFactory.Core().V1().Services()
+	go services.Informer().Run(stopCh)
+	if ok := cache.WaitForNamedCacheSync("faas-netes:services", stopCh, services.Informer().HasSynced); !ok {
+		log.Fatalf("failed to wait for cache to sync")
+	}
+
+	return services
+}
 
 // runController runs the faas-netes imperative controller
 func runController(setup []serverSetup) {
@@ -302,10 +312,12 @@ func runController(setup []serverSetup) {
 	// set up signals so we handle the first shutdown signal gracefully
 	stopCh := signals.SetupSignalHandler()
 	operator := false
-	listers := startInformers(setup[0], stopCh, operator)
-	handlers.RegisterEventHandlers(listers.DeploymentInformer, kubeClient, config.DefaultFunctionNamespace)
-	deployLister := listers.DeploymentInformer.Lister()
-	functionLookup := k8s.NewFunctionLookup(config.DefaultFunctionNamespace, listers.EndpointsInformer.Lister())
+	informers := startInformers(setup[0], stopCh, operator)
+	serviceInformer := startServiceInformers(setup[0], stopCh)
+	handlers.RegisterEventHandlers(informers.DeploymentInformer, kubeClient, config.DefaultFunctionNamespace)
+	deployLister := informers.DeploymentInformer.Lister()
+	serviceLister := serviceInformer.Lister()
+	functionLookup := k8s.NewFunctionLookup(config.DefaultFunctionNamespace, informers.EndpointsInformer.Lister())
 	// functionLookup := k8s.NewFunctionLookupRemote(kubeClient) //should also use remote resover if it is not in localhost cluster
 	functionList := k8s.NewFunctionList(config.DefaultFunctionNamespace, deployLister)
 
@@ -320,8 +332,8 @@ func runController(setup []serverSetup) {
 	for i := 1; i < len(setup); i++ {
 		// stopCh := signals.SetupSignalHandler()
 		operator := false
-		externalListers := startInformers(setup[i], stopCh, operator)
-		deployListers[i] = externalListers.DeploymentInformer.Lister()
+		externalInformers := startInformers(setup[i], stopCh, operator)
+		deployListers[i] = externalInformers.DeploymentInformer.Lister()
 		functionLookupInterfaces[i] = k8s.NewFunctionLookupRemote(setup[i].kubeClient)
 	}
 
@@ -338,7 +350,7 @@ func runController(setup []serverSetup) {
 		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, kubeClient),
 		UpdateFunction: handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, factory),
 		Health:         handlers.MakeHealthHandler(),
-		Info:           handlers.MakeInfoHandler(version.BuildVersion(), version.GitCommit),
+		Info:           handlers.MakeInfoHandler(version.BuildVersion(), version.GitCommit, serviceLister),
 		Secrets:        handlers.MakeSecretHandler(config.DefaultFunctionNamespace, kubeClient),
 		Logs:           logs.NewLogHandlerFunc(k8s.NewLogRequestor(kubeClient, config.DefaultFunctionNamespace), config.FaaSConfig.WriteTimeout),
 		ListNamespaces: handlers.MakeNamespacesLister(config.DefaultFunctionNamespace, kubeClient),
