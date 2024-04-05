@@ -28,9 +28,10 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		// multi cluster scenario
-		var resolver proxy.BaseURLResolver = nil
+		var resolver proxy.BaseURLResolver = resolvers[0]
 		offload := false
-		if len(deploymentListers) > 0 {
+		// means in multi cluster scenario
+		if len(deploymentListers) > 1 {
 			vars := mux.Vars(r)
 			functionName := vars["name"]
 

@@ -104,6 +104,13 @@ func main() {
 		if err != nil {
 			log.Fatalf("Error building kubeconfig path: %s", err.Error())
 		}
+
+		// also try to build from local
+		config, err := rest.InClusterConfig()
+		if err == nil {
+			clientCmdConfigs = append(clientCmdConfigs, config)
+		}
+		// measure distance of cluster
 		clientCmdConfigs = measureRTT(clientCmdConfigs)
 
 	} else {
@@ -241,7 +248,7 @@ func measureRTT(clientCmdConfigs []*rest.Config) []*rest.Config {
 			// }
 			RTTtoIdx[rtt] = idx
 			RTTs = append(RTTs, rtt)
-			// fmt.Println("RTT: ", rtt, "URL: ", config.Host)
+			fmt.Println("RTT: ", rtt, "URL: ", config.Host)
 		}
 	}
 	slices.Sort(RTTs)
