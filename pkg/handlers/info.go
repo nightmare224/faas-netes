@@ -80,8 +80,12 @@ func MakeInfoHandler(version, sha string, serviceLister v1corelisters.ServiceLis
 
 // add the overloaded infomation in it
 func measurePressure(serviceLister v1corelisters.ServiceLister) (bool, error) {
-
+	if serviceLister == nil {
+		err := fmt.Errorf("service lister is required for finding prometheus")
+		return false, err
+	}
 	address, err := getPrometheusServiceAddress(serviceLister)
+	fmt.Println("Get Address ", address)
 	if err != nil {
 		err := fmt.Errorf("error getting prometheus service address: %v", err)
 		return false, err
@@ -122,6 +126,7 @@ func measurePressure(serviceLister v1corelisters.ServiceLister) (bool, error) {
 func getPrometheusServiceAddress(serviceLister v1corelisters.ServiceLister) (string, error) {
 	svc, err := serviceLister.Services("openfaas").Get("prometheus")
 	if err != nil {
+		// fmt.Println(err)
 		return "", err
 	}
 	ip := svc.Spec.ClusterIP

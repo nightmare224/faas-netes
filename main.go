@@ -214,6 +214,9 @@ type customInformers struct {
 	DeploymentInformer v1apps.DeploymentInformer
 	FunctionsInformer  v1.FunctionInformer
 }
+type customPlatformInformers struct {
+	ServiceInformer v1core.ServiceInformer
+}
 
 func measureRTT(clientCmdConfigs []*rest.Config) []*rest.Config {
 
@@ -291,15 +294,23 @@ func startInformers(setup serverSetup, stopCh <-chan struct{}, operator bool) cu
 		FunctionsInformer:  functions,
 	}
 }
-func startServiceInformers(setup serverSetup, stopCh <-chan struct{}) v1core.ServiceInformer {
-	kubeInformerFactory := setup.kubeInformerFactory
+
+// the informer for openfaas namespace not openfaas-fn namespace
+func startPlatformInformers(kubeClient *kubernetes.Clientset, stopCh <-chan struct{}) customPlatformInformers {
+	namespaceScope := "openfaas"
+	kubeInformerOpt := kubeinformers.WithNamespace(namespaceScope)
+	kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClient, defaultResync, kubeInformerOpt)
+
+	// kubeInformerFactory := setup.kubeInformerFactory
 	services := kubeInformerFactory.Core().V1().Services()
 	go services.Informer().Run(stopCh)
 	if ok := cache.WaitForNamedCacheSync("faas-netes:services", stopCh, services.Informer().HasSynced); !ok {
 		log.Fatalf("failed to wait for cache to sync")
 	}
 
-	return services
+	return customPlatformInformers{
+		ServiceInformer: services,
+	}
 }
 
 // runController runs the faas-netes imperative controller
@@ -313,7 +324,7 @@ func runController(setup []serverSetup) {
 	stopCh := signals.SetupSignalHandler()
 	operator := false
 	informers := startInformers(setup[0], stopCh, operator)
-	serviceInformer := startServiceInformers(setup[0], stopCh)
+	serviceInformer := startPlatformInformers(setup[0].kubeClient, stopCh).ServiceInformer
 	handlers.RegisterEventHandlers(informers.DeploymentInformer, kubeClient, config.DefaultFunctionNamespace)
 	deployLister := informers.DeploymentInformer.Lister()
 	serviceLister := serviceInformer.Lister()
