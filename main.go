@@ -328,6 +328,7 @@ func runController(setup []serverSetup) {
 	handlers.RegisterEventHandlers(informers.DeploymentInformer, kubeClient, config.DefaultFunctionNamespace)
 	deployLister := informers.DeploymentInformer.Lister()
 	serviceLister := serviceInformer.Lister()
+	// TODO, the first one might also being remote
 	functionLookup := k8s.NewFunctionLookup(config.DefaultFunctionNamespace, informers.EndpointsInformer.Lister())
 	// functionLookup := k8s.NewFunctionLookupRemote(kubeClient) //should also use remote resover if it is not in localhost cluster
 	functionList := k8s.NewFunctionList(config.DefaultFunctionNamespace, deployLister)
@@ -352,7 +353,7 @@ func runController(setup []serverSetup) {
 	// printFunctionExecutionTime := true
 	bootstrapHandlers := providertypes.FaaSHandlers{
 		// FunctionProxy:  proxy.NewHandlerFunc(config.FaaSConfig, functionLookupInterfaces, printFunctionExecutionTime),
-		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, functionLookupInterfaces, deployListers, factory),
+		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, functionLookupInterfaces, deployListers, serviceLister, factory),
 		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, kubeClient),
 		// deploy on local cluster (index[0])
 		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, factory, functionList),
@@ -360,8 +361,8 @@ func runController(setup []serverSetup) {
 		FunctionStatus: handlers.MakeReplicaReader(config.DefaultFunctionNamespace, deployListers),
 		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, kubeClient),
 		UpdateFunction: handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, factory),
-		Health:         handlers.MakeHealthHandler(),
-		Info:           handlers.MakeInfoHandler(version.BuildVersion(), version.GitCommit, serviceLister),
+		Health:         handlers.MakeHealthHandler(serviceLister),
+		Info:           handlers.MakeInfoHandler(version.BuildVersion(), version.GitCommit),
 		Secrets:        handlers.MakeSecretHandler(config.DefaultFunctionNamespace, kubeClient),
 		Logs:           logs.NewLogHandlerFunc(k8s.NewLogRequestor(kubeClient, config.DefaultFunctionNamespace), config.FaaSConfig.WriteTimeout),
 		ListNamespaces: handlers.MakeNamespacesLister(config.DefaultFunctionNamespace, kubeClient),

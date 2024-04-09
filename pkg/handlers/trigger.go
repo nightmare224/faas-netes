@@ -15,12 +15,13 @@ import (
 	"github.com/openfaas/faas-provider/proxy"
 	types "github.com/openfaas/faas-provider/types"
 	v1 "k8s.io/client-go/listers/apps/v1"
+	v1corelisters "k8s.io/client-go/listers/core/v1"
 )
 
 // Make this able to search for other cluster's function.
 // And if other cluster exist the function, them deploy it on current local one
 // and trigger on local cluster
-func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resolvers []proxy.BaseURLResolver, deploymentListers []v1.DeploymentLister, factory k8s.FunctionFactory) http.HandlerFunc {
+func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resolvers []proxy.BaseURLResolver, deploymentListers []v1.DeploymentLister, serviceLister v1corelisters.ServiceLister, factory k8s.FunctionFactory) http.HandlerFunc {
 
 	// MakeReplicaReader(functionNamespace, deploymentListers[0])
 	// secrets := k8s.NewSecretsClient(factory.Client)
@@ -29,69 +30,90 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 	return func(w http.ResponseWriter, r *http.Request) {
 		// multi cluster scenario
 		var resolver proxy.BaseURLResolver = resolvers[0]
-		offload := false
 		// means in multi cluster scenario
 		if len(deploymentListers) > 1 {
 			vars := mux.Vars(r)
 			functionName := vars["name"]
-
+			var targetFunction *types.FunctionStatus = nil
+			availableCluster := len(deploymentListers)
+			offloaded, deployed, overload := false, false, false
 			for i, lister := range deploymentListers {
-				function, _ := getService(functionNamespace, functionName, lister)
+				function, err := getService(functionNamespace, functionName, lister)
+				if err != nil {
+					fmt.Println(err.Error())
+				}
 				if function != nil {
-					// function already in local
-					if i == 0 {
-						offload = false
-						resolver = resolvers[0]
-						fmt.Printf("The function %s is already deployed in the targeted cluster.\n", functionName)
-					} else {
-						fmt.Printf("The function %s is found in remote cluster %d.\n", functionName, i)
-						offload = true
-						// The deployment is still in remote cluster means there will have a cold start, unless the RTT > cold start
-						resolver = resolvers[i]
-						// deploy can take time, do it after finishing the request
-						defer func() {
-							deployment := types.FunctionDeployment{
-								Service:                function.Name,
-								Image:                  function.Image,
-								Namespace:              function.Namespace,
-								EnvProcess:             function.EnvProcess,
-								EnvVars:                function.EnvVars,
-								Constraints:            function.Constraints,
-								Secrets:                function.Constraints,
-								Labels:                 function.Labels,
-								Annotations:            function.Annotations,
-								Limits:                 function.Limits,
-								Requests:               function.Requests,
-								ReadOnlyRootFilesystem: function.ReadOnlyRootFilesystem,
-							}
-							functionList := k8s.NewFunctionList(functionNamespace, lister)
-							err, httpStatusCode := makeFunction(functionNamespace, factory, functionList, deployment)
-							if err != nil {
-								http.Error(w, err.Error(), httpStatusCode)
-								// return
-							}
-						}()
+					targetFunction = function
+				}
+				err = nil
+				if i == 0 {
+					overload, err = MeasurePressure(serviceLister)
+				} else {
+					overload, err = GetExertnalPressure(resolvers[i])
+				}
+				if err != nil {
+					fmt.Printf("Unable to measure pressure: %v", err.Error())
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				// if cluster is available
+				if !overload {
+					// found function, then offload directly
+					if function != nil {
+						OffloadRequest(w, r, config, resolvers[i])
+						offloaded = true
+						// deployed = (i < availableCluster)
+						// break
 					}
+					if i < availableCluster {
+						availableCluster = i
+						deployed = offloaded
+					}
+
+				}
+				if offloaded {
 					break
 				}
 			}
-		}
-
-		// The original handler, still only on local
-		// TODO: either wait for local function ready or forward the request to remote one
-		// Can see if RTT > cold start
-		// maybe do this concurrently with above in go routine can speedup a bit
-		// or using defer, to deploy function on local after request
-		if offload {
-			// offloadRequest(w, r)
-			//maybe add the check capacity of cluster before offload (or just assume cloud cluster have initite resource )
-			OffloadRequest(w, r, config, resolver)
+			if !deployed {
+				deployNewFunction := func() {
+					deployment := types.FunctionDeployment{
+						Service:                targetFunction.Name,
+						Image:                  targetFunction.Image,
+						Namespace:              targetFunction.Namespace,
+						EnvProcess:             targetFunction.EnvProcess,
+						EnvVars:                targetFunction.EnvVars,
+						Constraints:            targetFunction.Constraints,
+						Secrets:                targetFunction.Constraints,
+						Labels:                 targetFunction.Labels,
+						Annotations:            targetFunction.Annotations,
+						Limits:                 targetFunction.Limits,
+						Requests:               targetFunction.Requests,
+						ReadOnlyRootFilesystem: targetFunction.ReadOnlyRootFilesystem,
+					}
+					functionList := k8s.NewFunctionList(functionNamespace, deploymentListers[availableCluster])
+					err, httpStatusCode := makeFunction(functionNamespace, factory, functionList, deployment)
+					if err != nil {
+						fmt.Printf("Unable to make function: %v", err.Error())
+						http.Error(w, err.Error(), httpStatusCode)
+						return
+					}
+				}
+				// already offload
+				if offloaded {
+					defer deployNewFunction()
+				} else {
+					// TODO: wait until it done, and then offload
+					deployNewFunction()
+					// TODO: maybe see is RTT bigger, overload bigger or the cold start
+					OffloadRequest(w, r, config, resolvers[availableCluster])
+				}
+			}
 		} else {
 			proxy.NewHandlerFunc(config, resolver, true)(w, r)
 		}
 
 	}
-
 }
 
 // maybe in other place when the platform is overload the request can be redirect
@@ -145,8 +167,8 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	}
 
 	functionAddr, err := resolver.Resolve(functionName)
-	fmt.Printf("Function Address: %+v\n\n", functionAddr)
-	fmt.Printf("Original Request: %+v\n\n", originalReq)
+	// fmt.Printf("Function Address: %+v\n\n", functionAddr)
+	// fmt.Printf("Original Request: %+v\n\n", originalReq)
 	if err != nil {
 		w.Header().Add(openFaaSInternalHeader, "proxy")
 
