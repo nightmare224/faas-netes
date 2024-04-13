@@ -29,53 +29,20 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		// multi cluster scenario
+		fmt.Println("URL:", r.URL.Host, r.URL.Path)
 		var resolver proxy.BaseURLResolver = resolvers[0]
 		// means in multi cluster scenario
 		if len(deploymentListers) > 1 {
 			vars := mux.Vars(r)
 			functionName := vars["name"]
-			var targetFunction *types.FunctionStatus = nil
-			availableCluster := len(deploymentListers)
-			offloaded, deployed, overload := false, false, false
-			for i, lister := range deploymentListers {
-				function, err := getService(functionNamespace, functionName, lister)
-				if err != nil {
-					fmt.Println(err.Error())
-				}
-				if function != nil {
-					targetFunction = function
-				}
-				err = nil
-				if i == 0 {
-					overload, err = MeasurePressure(serviceLister)
-				} else {
-					overload, err = GetExertnalPressure(resolvers[i])
-				}
-				if err != nil {
-					fmt.Printf("Unable to measure pressure: %v", err.Error())
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-				// if cluster is available
-				if !overload {
-					// found function, then offload directly
-					if function != nil {
-						OffloadRequest(w, r, config, resolvers[i])
-						offloaded = true
-						// deployed = (i < availableCluster)
-						// break
-					}
-					if i < availableCluster {
-						availableCluster = i
-						deployed = offloaded
-					}
 
-				}
-				if offloaded {
-					break
-				}
+			targetFunction, deployCluster, offloadCluster, err := findSuitableCluster(functionNamespace, functionName, resolvers, serviceLister, deploymentListers)
+			if err != nil {
+				fmt.Printf("Unable to trigger function: %v", err.Error())
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
 			}
-			if !deployed {
+			if deployCluster != -1 {
 				deployNewFunction := func() {
 					deployment := types.FunctionDeployment{
 						Service:                targetFunction.Name,
@@ -91,7 +58,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 						Requests:               targetFunction.Requests,
 						ReadOnlyRootFilesystem: targetFunction.ReadOnlyRootFilesystem,
 					}
-					functionList := k8s.NewFunctionList(functionNamespace, deploymentListers[availableCluster])
+					functionList := k8s.NewFunctionList(functionNamespace, deploymentListers[deployCluster])
 					err, httpStatusCode := makeFunction(functionNamespace, factory, functionList, deployment)
 					if err != nil {
 						fmt.Printf("Unable to make function: %v", err.Error())
@@ -99,21 +66,77 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 						return
 					}
 				}
-				// already offload
-				if offloaded {
-					defer deployNewFunction()
-				} else {
+				if deployCluster == offloadCluster {
 					// TODO: wait until it done, and then offload
 					deployNewFunction()
+				} else {
 					// TODO: maybe see is RTT bigger, overload bigger or the cold start
-					OffloadRequest(w, r, config, resolvers[availableCluster])
+					defer deployNewFunction()
 				}
 			}
+			// trigger the function
+			OffloadRequest(w, r, config, resolvers[offloadCluster])
 		} else {
 			proxy.NewHandlerFunc(config, resolver, true)(w, r)
 		}
 
+		// if (*targetFunction.Annotations)["workload-type"] == "model-decomposition" {
+		// 	modelDecomposition()
+		// } else {
+		// 	fmt.Println("Normal workload")
+		// }
+
 	}
+}
+
+// func modelDecomposition() {
+// 	fmt.Println("model decomposition")
+// }
+
+func findSuitableCluster(functionNamespace string, functionName string, resolvers []proxy.BaseURLResolver, serviceLister v1corelisters.ServiceLister, deploymentListers []v1.DeploymentLister) (*types.FunctionStatus, int, int, error) {
+	var targetFunction *types.FunctionStatus = nil
+
+	availableCluster := len(deploymentListers)
+	for i, lister := range deploymentListers {
+		function, err := getService(functionNamespace, functionName, lister)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+		if function != nil {
+			targetFunction = function
+		}
+		overload := false
+		err = nil
+		if i == 0 {
+			overload, err = MeasurePressure(serviceLister)
+		} else {
+			overload, err = GetExertnalPressure(resolvers[i])
+		}
+		if err != nil {
+			err := fmt.Errorf("unable to measure pressure: %v", err.Error())
+			return nil, -1, -1, err
+		}
+		// cluster available
+		if !overload {
+			// cluster has function on it
+			if function != nil {
+				// cluster is the best choice
+				if i < availableCluster {
+					// offload function, deploy cluster, trigger cluster, error
+					return nil, -1, i, nil
+				} else {
+					return targetFunction, availableCluster, i, nil
+				}
+			}
+			availableCluster = min(i, availableCluster)
+		}
+	}
+	if targetFunction == nil {
+		err := fmt.Errorf("No endpoints available for: %s.", functionName)
+		return nil, -1, -1, err
+	}
+
+	return targetFunction, availableCluster, availableCluster, nil
 }
 
 // maybe in other place when the platform is overload the request can be redirect
