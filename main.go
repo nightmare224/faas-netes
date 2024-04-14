@@ -333,6 +333,8 @@ func runController(setup []serverSetup) {
 	// functionLookup := k8s.NewFunctionLookupRemote(kubeClient) //should also use remote resover if it is not in localhost cluster
 	functionList := k8s.NewFunctionList(config.DefaultFunctionNamespace, deployLister)
 
+	factories := make([]k8s.FunctionFactory, len(setup))
+	kubeClients := make([]*kubernetes.Clientset, len(setup))
 	// for external cluster
 	deployListers := make([]v1appslisters.DeploymentLister, len(setup))
 	deployListers[0] = deployLister
@@ -341,19 +343,21 @@ func runController(setup []serverSetup) {
 	//functionLists := make([]*k8s.FunctionList, len(setup))
 	//functionLists[0] = functionList
 	// external cluster
+
 	for i := 1; i < len(setup); i++ {
-		// stopCh := signals.SetupSignalHandler()
+		factories[i] = setup[i].functionFactory
+		kubeClients[i] = setup[i].kubeClient
 		operator := false
 		externalInformers := startInformers(setup[i], stopCh, operator)
 		deployListers[i] = externalInformers.DeploymentInformer.Lister()
-		functionLookupInterfaces[i] = k8s.NewFunctionLookupRemote(setup[i].kubeClient)
+		functionLookupInterfaces[i] = k8s.NewFunctionLookupRemote(kubeClients[i])
 	}
 
 	// create a handle a pass the config into, so the closure can hold the config
 	// printFunctionExecutionTime := true
 	bootstrapHandlers := providertypes.FaaSHandlers{
 		// FunctionProxy:  proxy.NewHandlerFunc(config.FaaSConfig, functionLookupInterfaces, printFunctionExecutionTime),
-		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, functionLookupInterfaces, deployListers, serviceLister, factory),
+		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, functionLookupInterfaces, deployListers, serviceLister, factories, kubeClients),
 		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, kubeClient),
 		// deploy on local cluster (index[0])
 		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, factory, functionList),

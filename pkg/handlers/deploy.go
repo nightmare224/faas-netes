@@ -71,69 +71,6 @@ func MakeDeployHandler(functionNamespace string, factory k8s.FunctionFactory, fu
 			return
 		}
 		w.WriteHeader(httpStatusCode)
-
-		// existingSecrets, err := secrets.GetSecrets(namespace, request.Secrets)
-		// if err != nil {
-		// 	wrappedErr := fmt.Errorf("unable to fetch secrets: %s", err.Error())
-		// 	http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
-		// 	return
-		// }
-
-		// if err := isAnonymous(request.Image); err != nil {
-		// 	http.Error(w, err.Error(), http.StatusBadRequest)
-		// 	return
-		// }
-
-		// deploymentSpec, specErr := makeDeploymentSpec(request, existingSecrets, factory)
-		// if specErr != nil {
-		// 	wrappedErr := fmt.Errorf("failed create Deployment spec: %s", specErr.Error())
-		// 	log.Println(wrappedErr)
-		// 	http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
-		// 	return
-		// }
-
-		// count, err := functionList.Count()
-		// if err != nil {
-		// 	err := fmt.Errorf("unable to count functions: %s", err.Error())
-		// 	http.Error(w, err.Error(), http.StatusInternalServerError)
-		// 	return
-		// }
-
-		// if count+1 > MaxFunctions {
-		// 	err := fmt.Errorf("unable to create function, maximum: %d, visit https://openfaas.com/pricing to upgrade to OpenFaaS Standard", MaxFunctions)
-		// 	http.Error(w, err.Error(), http.StatusBadRequest)
-		// 	return
-		// }
-
-		// deploy := factory.Client.AppsV1().Deployments(namespace)
-		// if _, err = deploy.Create(context.TODO(), deploymentSpec, metav1.CreateOptions{}); err != nil {
-		// 	wrappedErr := fmt.Errorf("unable create Deployment: %s", err.Error())
-		// 	log.Println(wrappedErr)
-		// 	http.Error(w, wrappedErr.Error(), http.StatusInternalServerError)
-		// 	return
-		// }
-
-		// log.Printf("Deployment created: %s.%s\n", request.Service, namespace)
-
-		// service := factory.Client.CoreV1().Services(namespace)
-		// serviceSpec, err := makeServiceSpec(request, factory)
-		// if err != nil {
-		// 	wrappedErr := fmt.Errorf("failed create Service spec: %s", err.Error())
-		// 	log.Println(wrappedErr)
-		// 	http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
-		// 	return
-		// }
-
-		// if _, err = service.Create(context.TODO(), serviceSpec, metav1.CreateOptions{}); err != nil {
-		// 	wrappedErr := fmt.Errorf("failed create Service: %s", err.Error())
-		// 	log.Println(wrappedErr)
-		// 	http.Error(w, wrappedErr.Error(), http.StatusBadRequest)
-		// 	return
-		// }
-
-		// log.Printf("Service created: %s.%s\n", request.Service, namespace)
-
-		// w.WriteHeader(http.StatusAccepted)
 	}
 }
 

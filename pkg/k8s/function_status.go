@@ -20,7 +20,10 @@ func AsFunctionStatus(item appsv1.Deployment) *types.FunctionStatus {
 	}
 
 	functionContainer := item.Spec.Template.Spec.Containers[0]
-
+	envVars := make(map[string]string, len(functionContainer.Env))
+	for _, env := range functionContainer.Env {
+		envVars[env.Name] = env.Value
+	}
 	labels := item.Spec.Template.Labels
 	function := types.FunctionStatus{
 		Name:              item.Name,
@@ -33,6 +36,7 @@ func AsFunctionStatus(item appsv1.Deployment) *types.FunctionStatus {
 		Namespace:         item.Namespace,
 		Secrets:           ReadFunctionSecretsSpec(item),
 		CreatedAt:         item.CreationTimestamp.Time,
+		EnvVars:           envVars,
 	}
 
 	req := &types.FunctionResources{Memory: functionContainer.Resources.Requests.Memory().String(), CPU: functionContainer.Resources.Requests.Cpu().String()}

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +15,9 @@ import (
 	fhttputil "github.com/openfaas/faas-provider/httputil"
 	"github.com/openfaas/faas-provider/proxy"
 	types "github.com/openfaas/faas-provider/types"
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	v1 "k8s.io/client-go/listers/apps/v1"
 	v1corelisters "k8s.io/client-go/listers/core/v1"
 )
@@ -21,8 +25,7 @@ import (
 // Make this able to search for other cluster's function.
 // And if other cluster exist the function, them deploy it on current local one
 // and trigger on local cluster
-func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resolvers []proxy.BaseURLResolver, deploymentListers []v1.DeploymentLister, serviceLister v1corelisters.ServiceLister, factory k8s.FunctionFactory) http.HandlerFunc {
-
+func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resolvers []proxy.BaseURLResolver, deploymentListers []v1.DeploymentLister, serviceLister v1corelisters.ServiceLister, factories []k8s.FunctionFactory, clientsets []*kubernetes.Clientset) http.HandlerFunc {
 	// MakeReplicaReader(functionNamespace, deploymentListers[0])
 	// secrets := k8s.NewSecretsClient(factory.Client)
 	// resolver := resolvers[0]
@@ -42,6 +45,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			fmt.Println("deploy target: ", deployCluster, "offload target:", offloadCluster)
 			if deployCluster != -1 {
 				deployNewFunction := func() {
 					deployment := types.FunctionDeployment{
@@ -51,7 +55,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 						EnvProcess:             targetFunction.EnvProcess,
 						EnvVars:                targetFunction.EnvVars,
 						Constraints:            targetFunction.Constraints,
-						Secrets:                targetFunction.Constraints,
+						Secrets:                targetFunction.Secrets,
 						Labels:                 targetFunction.Labels,
 						Annotations:            targetFunction.Annotations,
 						Limits:                 targetFunction.Limits,
@@ -59,7 +63,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 						ReadOnlyRootFilesystem: targetFunction.ReadOnlyRootFilesystem,
 					}
 					functionList := k8s.NewFunctionList(functionNamespace, deploymentListers[deployCluster])
-					err, httpStatusCode := makeFunction(functionNamespace, factory, functionList, deployment)
+					err, httpStatusCode := makeFunction(functionNamespace, factories[deployCluster], functionList, deployment)
 					if err != nil {
 						fmt.Printf("Unable to make function: %v", err.Error())
 						http.Error(w, err.Error(), httpStatusCode)
@@ -67,8 +71,25 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 					}
 				}
 				if deployCluster == offloadCluster {
-					// TODO: wait until it done, and then offload
 					deployNewFunction()
+					// wait until it done, and then offload
+					watch, err := clientsets[deployCluster].AppsV1().Deployments(functionNamespace).Watch(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("faas_function=%s", functionName)})
+					if err != nil {
+						fmt.Printf("Unable to watch function: %v", err.Error())
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+					for event := range watch.ResultChan() {
+						dep, ok := event.Object.(*appsv1.Deployment)
+						if !ok {
+							continue
+						}
+						if dep.Status.ReadyReplicas >= 1 {
+							fmt.Println("Deployment is ready")
+							watch.Stop()
+							break
+						}
+					}
 				} else {
 					// TODO: maybe see is RTT bigger, overload bigger or the cold start
 					defer deployNewFunction()
@@ -132,7 +153,7 @@ func findSuitableCluster(functionNamespace string, functionName string, resolver
 		}
 	}
 	if targetFunction == nil {
-		err := fmt.Errorf("No endpoints available for: %s.", functionName)
+		err := fmt.Errorf("no endpoints available for: %s", functionName)
 		return nil, -1, -1, err
 	}
 
