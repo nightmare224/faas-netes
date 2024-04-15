@@ -334,7 +334,9 @@ func runController(setup []serverSetup) {
 	functionList := k8s.NewFunctionList(config.DefaultFunctionNamespace, deployLister)
 
 	factories := make([]k8s.FunctionFactory, len(setup))
+	factories[0] = factory
 	kubeClients := make([]*kubernetes.Clientset, len(setup))
+	kubeClients[0] = kubeClient
 	// for external cluster
 	deployListers := make([]v1appslisters.DeploymentLister, len(setup))
 	deployListers[0] = deployLister

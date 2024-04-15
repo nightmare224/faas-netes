@@ -223,7 +223,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	}
 
 	proxyReq, err := buildProxyRequest(originalReq, functionAddr, "/function/"+functionName)
-	fmt.Printf("\nProxy Req: %+v\n", proxyReq)
+	// fmt.Printf("\nProxy Req: %+v\n", proxyReq)
 	if err != nil {
 
 		w.Header().Add(openFaaSInternalHeader, "proxy")
