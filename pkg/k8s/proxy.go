@@ -54,6 +54,13 @@ func getNamespace(name, defaultNamespace string) string {
 	return namespace
 }
 
+func (l *FunctionLookup) verifyNamespace(name string) error {
+	if name != "kube-system" {
+		return nil
+	}
+	// ToDo use global namepace parse and validation
+	return fmt.Errorf("namespace not allowed")
+}
 func (l *FunctionLookup) Resolve(name string) (url.URL, error) {
 	functionName := name
 	namespace := getNamespace(name, l.DefaultNamespace)
@@ -86,7 +93,7 @@ func (l *FunctionLookup) Resolve(name string) (url.URL, error) {
 	if len(svc.Subsets[0].Addresses) == 0 {
 		return url.URL{}, fmt.Errorf("no addresses in subset for \"%s.%s\"", functionName, namespace)
 	}
-
+	// a form of client-side load balancing, it choose random endpoint, can have more sophiscated design here
 	target := rand.Intn(all)
 
 	serviceIP := svc.Subsets[0].Addresses[target].IP
@@ -99,12 +106,4 @@ func (l *FunctionLookup) Resolve(name string) (url.URL, error) {
 	}
 
 	return *urlRes, nil
-}
-
-func (l *FunctionLookup) verifyNamespace(name string) error {
-	if name != "kube-system" {
-		return nil
-	}
-	// ToDo use global namepace parse and validation
-	return fmt.Errorf("namespace not allowed")
 }

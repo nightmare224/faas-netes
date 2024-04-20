@@ -324,10 +324,10 @@ func runController(setup []serverSetup) {
 	stopCh := signals.SetupSignalHandler()
 	operator := false
 	informers := startInformers(setup[0], stopCh, operator)
-	serviceInformer := startPlatformInformers(setup[0].kubeClient, stopCh).ServiceInformer
+	// serviceInformer := startPlatformInformers(setup[0].kubeClient, stopCh).ServiceInformer
 	handlers.RegisterEventHandlers(informers.DeploymentInformer, kubeClient, config.DefaultFunctionNamespace)
 	deployLister := informers.DeploymentInformer.Lister()
-	serviceLister := serviceInformer.Lister()
+	// serviceLister := serviceInformer.Lister()
 	// TODO, the first one might also being remote
 	functionLookup := k8s.NewFunctionLookup(config.DefaultFunctionNamespace, informers.EndpointsInformer.Lister())
 	// functionLookup := k8s.NewFunctionLookupRemote(kubeClient) //should also use remote resover if it is not in localhost cluster
@@ -359,7 +359,7 @@ func runController(setup []serverSetup) {
 	// printFunctionExecutionTime := true
 	bootstrapHandlers := providertypes.FaaSHandlers{
 		// FunctionProxy:  proxy.NewHandlerFunc(config.FaaSConfig, functionLookupInterfaces, printFunctionExecutionTime),
-		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, functionLookupInterfaces, deployListers, serviceLister, factories, kubeClients),
+		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, functionLookupInterfaces, deployListers, factories, kubeClients),
 		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, kubeClient),
 		// deploy on local cluster (index[0])
 		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, factory, functionList),
@@ -367,7 +367,7 @@ func runController(setup []serverSetup) {
 		FunctionStatus: handlers.MakeReplicaReader(config.DefaultFunctionNamespace, deployListers),
 		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, kubeClient),
 		UpdateFunction: handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, factory),
-		Health:         handlers.MakeHealthHandler(serviceLister),
+		Health:         handlers.MakeHealthHandler(),
 		Info:           handlers.MakeInfoHandler(version.BuildVersion(), version.GitCommit),
 		Secrets:        handlers.MakeSecretHandler(config.DefaultFunctionNamespace, kubeClient),
 		Logs:           logs.NewLogHandlerFunc(k8s.NewLogRequestor(kubeClient, config.DefaultFunctionNamespace), config.FaaSConfig.WriteTimeout),

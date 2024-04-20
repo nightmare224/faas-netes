@@ -16,14 +16,13 @@ import (
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
-	v1corelisters "k8s.io/client-go/listers/core/v1"
 )
 
 const (
 	// CPU average overload threshold within one minitues
-	CPUOverloadThreshold = 0.90
+	CPUOverloadThreshold = 0.50
 	// Memory average overload threshold within one minitues
-	MemOverloadThreshold = 0.90
+	MemOverloadThreshold = 0.50
 )
 
 type CustomHealth struct {
@@ -31,7 +30,7 @@ type CustomHealth struct {
 }
 
 // MakeHealthHandler returns 200/OK when healthy
-func MakeHealthHandler(serviceLister v1corelisters.ServiceLister) http.HandlerFunc {
+func MakeHealthHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		overload_showed := r.URL.Query().Get("overload")
@@ -40,7 +39,7 @@ func MakeHealthHandler(serviceLister v1corelisters.ServiceLister) http.HandlerFu
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		overload, err := MeasurePressure(serviceLister)
+		overload, err := MeasurePressure()
 		if err != nil {
 			fmt.Printf("Unable to get metric from pormetheus: %s", err)
 			w.WriteHeader(http.StatusOK)
@@ -88,17 +87,18 @@ func GetExertnalPressure(resolver proxy.BaseURLResolver) (bool, error) {
 }
 
 // add the overloaded infomation in it
-func MeasurePressure(serviceLister v1corelisters.ServiceLister) (bool, error) {
-	if serviceLister == nil {
-		err := fmt.Errorf("service lister is required for finding prometheus")
-		return false, err
-	}
-	address, err := getPrometheusServiceAddress(serviceLister)
-	fmt.Println("Get Address ", address)
-	if err != nil {
-		err := fmt.Errorf("error getting prometheus service address: %v", err)
-		return false, err
-	}
+func MeasurePressure() (bool, error) {
+	// if serviceLister == nil {
+	// 	err := fmt.Errorf("service lister is required for finding prometheus")
+	// 	return false, err
+	// }
+	// address, err := getPrometheusServiceAddress(serviceLister)
+	// fmt.Println("Get Address ", address)
+	// if err != nil {
+	// 	err := fmt.Errorf("error getting prometheus service address: %v", err)
+	// 	return false, err
+	// }
+	address := "http://prometheus.openfaas.svc:9090"
 	client, err := api.NewClient(api.Config{
 		Address: address,
 	})
@@ -132,18 +132,19 @@ func MeasurePressure(serviceLister v1corelisters.ServiceLister) (bool, error) {
 
 	return overload, nil
 }
-func getPrometheusServiceAddress(serviceLister v1corelisters.ServiceLister) (string, error) {
-	svc, err := serviceLister.Services("openfaas").Get("prometheus")
-	if err != nil {
-		// fmt.Println(err)
-		return "", err
-	}
-	ip := svc.Spec.ClusterIP
-	port := svc.Spec.Ports[0].Port
-	address := fmt.Sprintf("http://%s:%d", ip, port)
 
-	return address, nil
-}
+// func getPrometheusServiceAddress(serviceLister v1corelisters.ServiceLister) (string, error) {
+// 	svc, err := serviceLister.Services("openfaas").Get("prometheus")
+// 	if err != nil {
+// 		// fmt.Println(err)
+// 		return "", err
+// 	}
+// 	ip := svc.Spec.ClusterIP
+// 	port := svc.Spec.Ports[0].Port
+// 	address := fmt.Sprintf("http://%s:%d", ip, port)
+
+//		return address, nil
+//	}
 func queryResourceAverageLoad(promClient v1.API, ctx context.Context, query string) (model.SampleValue, error) {
 
 	result, _, err := promClient.Query(ctx, query, time.Now(), v1.WithTimeout(5*time.Second))

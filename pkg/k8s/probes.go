@@ -20,11 +20,30 @@ type FunctionProbes struct {
 // by default the health check runs `cat /tmp/.lock` every ten seconds
 func (f *FunctionFactory) MakeProbes(r types.FunctionDeployment) (*FunctionProbes, error) {
 	var handler corev1.ProbeHandler
+	var readinessHandler corev1.ProbeHandler
+
+	// check customer readiness
 
 	if f.Config.HTTPProbe {
 		handler = corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
 				Path: "/_/health",
+				Port: intstr.IntOrString{
+					Type:   intstr.Int,
+					IntVal: int32(f.Config.RuntimeHTTPPort),
+				},
+			},
+		}
+		path := "/_/health"
+		if r.Annotations != nil {
+			_, ok := (*r.Annotations)["com.openfaas.ready.http.path"]
+			if ok {
+				path = (*r.Annotations)["com.openfaas.ready.http.path"]
+			}
+		}
+		readinessHandler = corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: path,
 				Port: intstr.IntOrString{
 					Type:   intstr.Int,
 					IntVal: int32(f.Config.RuntimeHTTPPort),
@@ -38,11 +57,12 @@ func (f *FunctionFactory) MakeProbes(r types.FunctionDeployment) (*FunctionProbe
 				Command: []string{"cat", path},
 			},
 		}
+		readinessHandler = handler
 	}
 
 	probes := FunctionProbes{}
 	probes.Readiness = &corev1.Probe{
-		ProbeHandler:        handler,
+		ProbeHandler:        readinessHandler,
 		InitialDelaySeconds: f.Config.ReadinessProbe.InitialDelaySeconds,
 		TimeoutSeconds:      int32(f.Config.ReadinessProbe.TimeoutSeconds),
 		PeriodSeconds:       int32(f.Config.ReadinessProbe.PeriodSeconds),

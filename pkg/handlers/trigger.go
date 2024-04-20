@@ -19,13 +19,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	v1 "k8s.io/client-go/listers/apps/v1"
-	v1corelisters "k8s.io/client-go/listers/core/v1"
 )
 
 // Make this able to search for other cluster's function.
 // And if other cluster exist the function, them deploy it on current local one
 // and trigger on local cluster
-func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resolvers []proxy.BaseURLResolver, deploymentListers []v1.DeploymentLister, serviceLister v1corelisters.ServiceLister, factories []k8s.FunctionFactory, clientsets []*kubernetes.Clientset) http.HandlerFunc {
+func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resolvers []proxy.BaseURLResolver, deploymentListers []v1.DeploymentLister, factories []k8s.FunctionFactory, clientsets []*kubernetes.Clientset) http.HandlerFunc {
 	// MakeReplicaReader(functionNamespace, deploymentListers[0])
 	// secrets := k8s.NewSecretsClient(factory.Client)
 	// resolver := resolvers[0]
@@ -39,7 +38,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 			vars := mux.Vars(r)
 			functionName := vars["name"]
 
-			targetFunction, deployCluster, offloadCluster, err := findSuitableCluster(functionNamespace, functionName, resolvers, serviceLister, deploymentListers)
+			targetFunction, deployCluster, offloadCluster, err := findSuitableCluster(functionNamespace, functionName, resolvers, deploymentListers)
 			if err != nil {
 				fmt.Printf("Unable to trigger function: %v", err.Error())
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -114,7 +113,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resol
 // 	fmt.Println("model decomposition")
 // }
 
-func findSuitableCluster(functionNamespace string, functionName string, resolvers []proxy.BaseURLResolver, serviceLister v1corelisters.ServiceLister, deploymentListers []v1.DeploymentLister) (*types.FunctionStatus, int, int, error) {
+func findSuitableCluster(functionNamespace string, functionName string, resolvers []proxy.BaseURLResolver, deploymentListers []v1.DeploymentLister) (*types.FunctionStatus, int, int, error) {
 	var targetFunction *types.FunctionStatus = nil
 
 	availableCluster := len(deploymentListers)
@@ -129,7 +128,7 @@ func findSuitableCluster(functionNamespace string, functionName string, resolver
 		overload := false
 		err = nil
 		if i == 0 {
-			overload, err = MeasurePressure(serviceLister)
+			overload, err = MeasurePressure()
 		} else {
 			overload, err = GetExertnalPressure(resolvers[i])
 		}
