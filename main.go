@@ -30,6 +30,7 @@ import (
 	"github.com/openfaas/faas-provider/proxy"
 	providertypes "github.com/openfaas/faas-provider/types"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeinformers "k8s.io/client-go/informers"
 	v1apps "k8s.io/client-go/informers/apps/v1"
 	v1core "k8s.io/client-go/informers/core/v1"
@@ -82,8 +83,15 @@ func main() {
 	}
 
 	var clientCmdConfigs []*rest.Config
+	clusterIDSet := make(map[string]struct{})
 	if kubeconfigPath != "" {
-		// entries, err := os.ReadDir(kubeconfigPath)
+
+		config, errConfig := rest.InClusterConfig()
+		if errConfig == nil {
+			clientCmdConfigs = append(clientCmdConfigs, config)
+			clusterID := getClusterIdentifier(config)
+			clusterIDSet[clusterID] = struct{}{}
+		}
 
 		err := filepath.WalkDir(kubeconfigPath, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -95,8 +103,13 @@ func main() {
 				if err != nil {
 					log.Fatalf("Error building kubeconfig: %s", err.Error())
 				}
-				clientCmdConfigs = append(clientCmdConfigs, config)
-				fmt.Printf("Host: %s, APIPath: %s\n", clientCmdConfigs[len(clientCmdConfigs)-1].Host, clientCmdConfigs[len(clientCmdConfigs)-1].APIPath)
+				fmt.Println("cluster ID: ", getClusterIdentifier(config))
+				clusterID := getClusterIdentifier(config)
+				if _, exists := clusterIDSet[clusterID]; !exists {
+					clusterIDSet[clusterID] = struct{}{}
+					clientCmdConfigs = append(clientCmdConfigs, config)
+					fmt.Printf("Host: %s, APIPath: %s\n", clientCmdConfigs[len(clientCmdConfigs)-1].Host, clientCmdConfigs[len(clientCmdConfigs)-1].APIPath)
+				}
 			}
 
 			return nil
@@ -105,11 +118,6 @@ func main() {
 			log.Fatalf("Error building kubeconfig path: %s", err.Error())
 		}
 
-		// also try to build from local
-		config, err := rest.InClusterConfig()
-		if err == nil {
-			clientCmdConfigs = append(clientCmdConfigs, config)
-		}
 		// measure distance of cluster
 		clientCmdConfigs = measureRTT(clientCmdConfigs)
 
@@ -216,6 +224,19 @@ type customInformers struct {
 }
 type customPlatformInformers struct {
 	ServiceInformer v1core.ServiceInformer
+}
+
+// user openfaas namespace uuid as cluster id
+func getClusterIdentifier(config *rest.Config) string {
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Fatalf("Error building Kubernetes clientset: %s", err.Error())
+	}
+	namespace, err := clientset.CoreV1().Namespaces().Get(context.TODO(), "openfaas", metav1.GetOptions{})
+	if err != nil {
+		log.Fatalf("Error get openfaas namespace: %s", err.Error())
+	}
+	return string(namespace.UID)
 }
 
 func measureRTT(clientCmdConfigs []*rest.Config) []*rest.Config {
