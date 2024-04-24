@@ -20,9 +20,9 @@ import (
 
 const (
 	// CPU average overload threshold within one minitues
-	CPUOverloadThreshold = 0.50
+	CPUOverloadThreshold = 0.80
 	// Memory average overload threshold within one minitues
-	MemOverloadThreshold = 0.50
+	MemOverloadThreshold = 0.80
 )
 
 type CustomHealth struct {
@@ -74,7 +74,7 @@ func GetExertnalPressure(resolver proxy.BaseURLResolver) (bool, error) {
 
 	// defer upstreamCall.Body.Close()
 
-	var health CustomHealth
+	var health = CustomHealth{Overload: false}
 
 	body, _ := io.ReadAll(resp.Body)
 	err = json.Unmarshal(body, &health)
