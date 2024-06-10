@@ -15,8 +15,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"time"
 
+	"github.com/openfaas/faas-netes/pkg/catalog"
 	clientset "github.com/openfaas/faas-netes/pkg/client/clientset/versioned"
 	informers "github.com/openfaas/faas-netes/pkg/client/informers/externalversions"
 	v1 "github.com/openfaas/faas-netes/pkg/client/informers/externalversions/openfaas/v1"
@@ -376,6 +378,21 @@ func runController(setup []serverSetup) {
 		functionLookupInterfaces[i] = k8s.NewFunctionLookupRemote(kubeClients[i])
 	}
 
+	// create the catalog to store p
+	c := catalog.NewCatalog()
+	// node := initSelfCatagory(c, client)
+	initSelfCatagory(c, config.DefaultFunctionNamespace, deployLister)
+	// create catalog
+	InitNetworkErr := catalog.InitInfoNetwork(c)
+	if InitNetworkErr != nil {
+		err := fmt.Errorf("cannot init info network: %s", InitNetworkErr)
+		panic(err)
+	}
+
+	// start the local update
+	// promClient := initPromClient(localResolver)
+	// go node.ListenUpdateInfo(client, &promClient)
+
 	// create a handle a pass the config into, so the closure can hold the config
 	// printFunctionExecutionTime := true
 	bootstrapHandlers := providertypes.FaaSHandlers{
@@ -384,7 +401,7 @@ func runController(setup []serverSetup) {
 		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, kubeClient),
 		// deploy on local cluster (index[0])
 		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, factory, functionList),
-		FunctionLister: handlers.MakeFunctionReader(config.DefaultFunctionNamespace, deployListers),
+		FunctionLister: handlers.MakeFunctionReader(config.DefaultFunctionNamespace, c),
 		FunctionStatus: handlers.MakeReplicaReader(config.DefaultFunctionNamespace, deployListers),
 		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, kubeClient),
 		UpdateFunction: handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, factory),
@@ -409,4 +426,25 @@ type serverSetup struct {
 	functionFactory     k8s.FunctionFactory
 	kubeInformerFactory kubeinformers.SharedInformerFactory
 	faasInformerFactory informers.SharedInformerFactory
+}
+
+func initSelfCatagory(c catalog.Catalog, functionNamespace string, deploymentLister v1appslisters.DeploymentLister) *catalog.Node {
+	// init available function to catalog
+	fns, err := handlers.ListFunctionStatus(functionNamespace, deploymentLister)
+	if err != nil {
+		fmt.Printf("cannot init available function: %s", err)
+		panic(err)
+	}
+
+	node := catalog.NewNode()
+	c.NodeCatalog[c.GetSelfCatalogKey()] = &node
+	for i, fn := range fns {
+		// TODO: should be more sphofisticate
+		c.FunctionCatalog[fn.Name] = &fns[i]
+		c.NodeCatalog[c.GetSelfCatalogKey()].AvailableFunctionsReplicas[fn.Name] = fn.AvailableReplicas
+		c.NodeCatalog[c.GetSelfCatalogKey()].FunctionExecutionTime[fn.Name] = new(atomic.Int64)
+		c.NodeCatalog[c.GetSelfCatalogKey()].FunctionExecutionTime[fn.Name].Store(1)
+	}
+
+	return c.NodeCatalog[c.GetSelfCatalogKey()]
 }

@@ -6,95 +6,94 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
 	"net/http"
 
-	types "github.com/openfaas/faas-provider/types"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
-	v1 "k8s.io/client-go/listers/apps/v1"
-	klog "k8s.io/klog"
-
-	"github.com/openfaas/faas-netes/pkg/k8s"
+	"github.com/openfaas/faas-netes/pkg/catalog"
 )
 
 // MakeFunctionReader handler for reading functions deployed in the cluster as deployments.
-func MakeFunctionReader(defaultNamespace string, deploymentListers []v1.DeploymentLister) http.HandlerFunc {
+func MakeFunctionReader(defaultNamespace string, c catalog.Catalog) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		q := r.URL.Query()
-		namespace := q.Get("namespace")
+		// q := r.URL.Query()
+		// namespace := q.Get("namespace")
 
-		lookupNamespace := defaultNamespace
+		// lookupNamespace := defaultNamespace
 
-		if len(namespace) > 0 {
-			lookupNamespace = namespace
-		}
+		// if len(namespace) > 0 {
+		// 	lookupNamespace = namespace
+		// }
 
-		if lookupNamespace != defaultNamespace {
-			http.Error(w, fmt.Sprintf("namespace must be: %s", defaultNamespace), http.StatusBadRequest)
-			return
-		}
+		// if lookupNamespace != defaultNamespace {
+		// 	http.Error(w, fmt.Sprintf("namespace must be: %s", defaultNamespace), http.StatusBadRequest)
+		// 	return
+		// }
 
-		if lookupNamespace == "kube-system" {
-			http.Error(w, "unable to list within the kube-system namespace", http.StatusUnauthorized)
-			return
-		}
+		// if lookupNamespace == "kube-system" {
+		// 	http.Error(w, "unable to list within the kube-system namespace", http.StatusUnauthorized)
+		// 	return
+		// }
 
-		functions, err := getServiceList(lookupNamespace, deploymentListers)
-		if err != nil {
-			log.Println(err)
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
-			return
-		}
+		// functions, err := getServiceList(lookupNamespace, deploymentListers)
+		// if err != nil {
+		// 	log.Println(err)
+		// 	w.WriteHeader(http.StatusInternalServerError)
+		// 	w.Write([]byte(err.Error()))
+		// 	return
+		// }
 
-		functionBytes, err := json.Marshal(functions)
-		if err != nil {
-			klog.Errorf("Failed to marshal functions: %s", err.Error())
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Failed to marshal functions"))
-			return
-		}
+		// functionBytes, err := json.Marshal(functions)
+		// if err != nil {
+		// 	klog.Errorf("Failed to marshal functions: %s", err.Error())
+		// 	w.WriteHeader(http.StatusInternalServerError)
+		// 	w.Write([]byte("Failed to marshal functions"))
+		// 	return
+		// }
 
+		// w.Header().Set("Content-Type", "application/json")
+		// w.WriteHeader(http.StatusOK)
+		// w.Write(functionBytes)
+
+		infoLevel := catalog.ClusterLevel
+		res := c.ListAvailableFunctions(infoLevel)
+		body, _ := json.Marshal(res)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(functionBytes)
+		w.Write(body)
 	}
 }
 
-func getServiceList(functionNamespace string, deploymentListers []v1.DeploymentLister) ([]types.FunctionStatus, error) {
-	functions := []types.FunctionStatus{}
+// func getServiceList(functionNamespace string, deploymentListers []v1.DeploymentLister) ([]types.FunctionStatus, error) {
+// 	functions := []types.FunctionStatus{}
 
-	sel := labels.NewSelector()
-	req, err := labels.NewRequirement("faas_function", selection.Exists, []string{})
-	if err != nil {
-		return functions, err
-	}
-	onlyFunctions := sel.Add(*req)
+// 	sel := labels.NewSelector()
+// 	req, err := labels.NewRequirement("faas_function", selection.Exists, []string{})
+// 	if err != nil {
+// 		return functions, err
+// 	}
+// 	onlyFunctions := sel.Add(*req)
 
-	functionnameSet := make(map[string]struct{})
-	for _, deploymentLister := range deploymentListers {
-		res, err := deploymentLister.Deployments(functionNamespace).List(onlyFunctions)
+// 	functionnameSet := make(map[string]struct{})
+// 	for _, deploymentLister := range deploymentListers {
+// 		res, err := deploymentLister.Deployments(functionNamespace).List(onlyFunctions)
 
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range res {
-			if item != nil {
-				// ignore if the function already is listed by closet cluster
-				if _, exist := functionnameSet[item.Name]; exist {
-					continue
-				}
-				function := k8s.AsFunctionStatus(*item)
-				if function != nil {
-					functions = append(functions, *function)
-					functionnameSet[item.Name] = struct{}{}
-				}
-			}
-		}
-	}
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		for _, item := range res {
+// 			if item != nil {
+// 				// ignore if the function already is listed by closet cluster
+// 				if _, exist := functionnameSet[item.Name]; exist {
+// 					continue
+// 				}
+// 				function := k8s.AsFunctionStatus(*item)
+// 				if function != nil {
+// 					functions = append(functions, *function)
+// 					functionnameSet[item.Name] = struct{}{}
+// 				}
+// 			}
+// 		}
+// 	}
 
-	return functions, nil
-}
+// 	return functions, nil
+// }
