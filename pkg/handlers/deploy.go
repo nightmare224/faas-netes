@@ -14,7 +14,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/openfaas/faas-netes/pkg/catalog"
 	"github.com/openfaas/faas-netes/pkg/k8s"
 
 	types "github.com/openfaas/faas-provider/types"
@@ -23,13 +25,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/kubernetes"
 )
 
 // initialReplicasCount how many replicas to start of creating for a function
 const initialReplicasCount = 1
 
 // MakeDeployHandler creates a handler to create new functions in the cluster
-func MakeDeployHandler(functionNamespace string, factory k8s.FunctionFactory, functionList *k8s.FunctionList) http.HandlerFunc {
+func MakeDeployHandler(functionNamespace string, factory k8s.FunctionFactory, functionList *k8s.FunctionList, kubeClient *kubernetes.Clientset, c catalog.Catalog) http.HandlerFunc {
 	// secrets := k8s.NewSecretsClient(factory.Client)
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -70,10 +73,19 @@ func MakeDeployHandler(functionNamespace string, factory k8s.FunctionFactory, fu
 			http.Error(w, err.Error(), httpStatusCode)
 			return
 		}
+		// update the catalog until the function is ready
+		go func() {
+			fn, err := waitDeployReadyAndReport(kubeClient, namespace, request.Service)
+			if err != nil {
+				log.Printf("[Deploy] error deploying %s, error: %s\n", request.Service, err)
+				return
+			}
+			c.AddAvailableFunctions(fn)
+		}()
+
 		w.WriteHeader(httpStatusCode)
 	}
 }
-
 func makeFunction(namespace string, factory k8s.FunctionFactory, functionList *k8s.FunctionList, function types.FunctionDeployment) (error, int) {
 
 	secrets := k8s.NewSecretsClient(factory.Client)
@@ -404,4 +416,49 @@ func getMinReplicaCount(labels map[string]string) *int32 {
 	}
 
 	return nil
+}
+
+func waitDeployReadyAndReport(kubeClient *kubernetes.Clientset, functionNamespace string, functionName string) (types.FunctionStatus, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+	defer cancel()
+	watch, err := kubeClient.AppsV1().Deployments(functionNamespace).Watch(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("faas_function=%s", functionName)})
+	if err != nil {
+		fmt.Printf("Unable to watch function: %v", err.Error())
+		return types.FunctionStatus{}, err
+	}
+	for {
+		select {
+		case event, ok := <-watch.ResultChan():
+			if !ok {
+				err := fmt.Errorf("deployment watch channel for function %s closed", functionName)
+				return types.FunctionStatus{}, err
+			}
+			dep, ok := event.Object.(*appsv1.Deployment)
+			if !ok {
+				continue
+			}
+			if dep.Status.ReadyReplicas >= 1 {
+				fmt.Println("Deployment is ready")
+				watch.Stop()
+				return *k8s.AsFunctionStatus(*dep), nil
+			}
+		case <-ctx.Done():
+			err := fmt.Errorf("deployment watch channel for function %s closed", functionName)
+			watch.Stop()
+			return types.FunctionStatus{}, err
+		}
+	}
+
+	// for event := range watch.ResultChan() {
+	// 	dep, ok := event.Object.(*appsv1.Deployment)
+	// 	if !ok {
+	// 		continue
+	// 	}
+	// 	if dep.Status.ReadyReplicas >= 1 {
+	// 		fmt.Println("Deployment is ready")
+	// 		watch.Stop()
+	// 		return *k8s.AsFunctionStatus(*dep), nil
+	// 	}
+	// }
+	// return
 }

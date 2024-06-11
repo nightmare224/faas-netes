@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/openfaas/faas-netes/pkg/catalog"
 	"github.com/openfaas/faas-provider/types"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -19,7 +20,7 @@ import (
 )
 
 // MakeDeleteHandler delete a function
-func MakeDeleteHandler(defaultNamespace string, clientset *kubernetes.Clientset) http.HandlerFunc {
+func MakeDeleteHandler(defaultNamespace string, clientset *kubernetes.Clientset, c catalog.Catalog) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -85,6 +86,9 @@ func MakeDeleteHandler(defaultNamespace string, clientset *kubernetes.Clientset)
 			w.Write([]byte("Not a function: " + request.FunctionName))
 			return
 		}
+
+		// update the catalog
+		c.DeleteAvailableFunctions(request.FunctionName)
 
 		w.WriteHeader(http.StatusAccepted)
 	}

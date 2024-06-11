@@ -25,16 +25,16 @@ func (node *Node) deleteAvailableFunctions(functionName string) {
 	delete(node.FunctionExecutionTime, functionName)
 }
 
-// func (node *Node) ListenUpdateInfo(clientContainerd *containerd.Client, clientProm *promv1.API) {
-// 	for {
-// 		// current disable the local replica health monitor
-// 		if /* node.updateAvailableReplicas(clientContainerd) || */ node.updatePressure(clientProm) {
-// 			node.publishInfo()
-// 		}
-// 		time.Sleep(infoUpdateIntervalSec * time.Second)
-// 	}
+func (node *Node) ListenUpdateInfo(clientProm *promv1.API) {
+	for {
+		// current disable the local replica health monitor
+		if /* node.updateAvailableReplicas(clientContainerd) || */ node.updatePressure(clientProm) {
+			node.publishInfo()
+		}
+		time.Sleep(infoUpdateIntervalSec * time.Second)
+	}
 
-// }
+}
 
 // add the overloaded infomation in it
 func (node *Node) updatePressure(client *promv1.API) bool {

@@ -32,6 +32,8 @@ import (
 	"github.com/openfaas/faas-provider/proxy"
 	providertypes "github.com/openfaas/faas-provider/types"
 
+	promapi "github.com/prometheus/client_golang/api"
+	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeinformers "k8s.io/client-go/informers"
 	v1apps "k8s.io/client-go/informers/apps/v1"
@@ -380,8 +382,7 @@ func runController(setup []serverSetup) {
 
 	// create the catalog to store p
 	c := catalog.NewCatalog()
-	// node := initSelfCatagory(c, client)
-	initSelfCatagory(c, config.DefaultFunctionNamespace, deployLister)
+	node := initSelfCatagory(c, config.DefaultFunctionNamespace, deployLister)
 	// create catalog
 	InitNetworkErr := catalog.InitInfoNetwork(c)
 	if InitNetworkErr != nil {
@@ -390,22 +391,22 @@ func runController(setup []serverSetup) {
 	}
 
 	// start the local update
-	// promClient := initPromClient(localResolver)
-	// go node.ListenUpdateInfo(client, &promClient)
+	promClient := initPromClient()
+	go node.ListenUpdateInfo(&promClient)
 
 	// create a handle a pass the config into, so the closure can hold the config
 	// printFunctionExecutionTime := true
 	bootstrapHandlers := providertypes.FaaSHandlers{
 		// FunctionProxy:  proxy.NewHandlerFunc(config.FaaSConfig, functionLookupInterfaces, printFunctionExecutionTime),
 		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, functionLookupInterfaces, deployListers, factories, kubeClients),
-		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, kubeClient),
+		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, kubeClient, c),
 		// deploy on local cluster (index[0])
-		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, factory, functionList),
+		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, factory, functionList, kubeClient, c),
 		FunctionLister: handlers.MakeFunctionReader(config.DefaultFunctionNamespace, c),
-		FunctionStatus: handlers.MakeReplicaReader(config.DefaultFunctionNamespace, deployListers),
+		FunctionStatus: handlers.MakeReplicaReader(config.DefaultFunctionNamespace, deployListers, c),
 		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, kubeClient),
 		UpdateFunction: handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, factory),
-		Health:         handlers.MakeHealthHandler(),
+		Health:         handlers.MakeHealthHandler(node),
 		Info:           handlers.MakeInfoHandler(version.BuildVersion(), version.GitCommit),
 		Secrets:        handlers.MakeSecretHandler(config.DefaultFunctionNamespace, kubeClient),
 		Logs:           logs.NewLogHandlerFunc(k8s.NewLogRequestor(kubeClient, config.DefaultFunctionNamespace), config.FaaSConfig.WriteTimeout),
@@ -447,4 +448,15 @@ func initSelfCatagory(c catalog.Catalog, functionNamespace string, deploymentLis
 	}
 
 	return c.NodeCatalog[c.GetSelfCatalogKey()]
+}
+
+func initPromClient() promv1.API {
+	address := "http://prometheus.openfaas.svc:9090"
+	promClient, _ := promapi.NewClient(promapi.Config{
+		Address: address,
+	})
+
+	promAPIClient := promv1.NewAPI(promClient)
+
+	return promAPIClient
 }
