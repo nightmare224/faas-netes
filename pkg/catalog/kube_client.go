@@ -68,28 +68,23 @@ func NewKubeConfig(kubeconfigPath string) ([]*rest.Config, error) {
 	return clientCmdConfigs, nil
 }
 
-func NewKubeP2PMappingList(ipKubeMapping map[string]KubeP2PMapping, c Catalog) KubeP2PMappingList {
+// assume the p2p ip is same with kubernetes api id, so it can be mapped
+func NewKubeP2PMappingList(ipKubeMapping map[string]KubeP2PMapping, selfIp string, c Catalog) KubeP2PMappingList {
 
-	kubeP2PMappingList := KubeP2PMappingList{
-		// also add itself into it (for itself, it don't need the faas client)
+	// put itself in to list, which the local one already fill the p2p id
+	kubeP2PMappingList := KubeP2PMappingList{ipKubeMapping[selfIp]}
 
+	for p2pID, p2pNode := range c.NodeCatalog {
+		if p2pID != c.GetSelfCatalogKey() {
+			kube, exist := ipKubeMapping[p2pNode.Ip]
+			if !exist {
+				log.Fatalf("cannot find the corresponding kubernetes client for host: %s\n", p2pNode.Ip)
+			}
+			kube.P2PID = p2pID
+			kubeP2PMappingList = append(kubeP2PMappingList, kube)
+		}
 	}
-	// //
-	// faasClients := newFaasClients(c.NodeCatalog[selfCatagoryKey].Ip)
-	// for _, client := range faasClients {
-	// 	for p2pID, p2pNode := range c.NodeCatalog {
-	// 		if strings.HasPrefix(client.GatewayURL.Host, p2pNode.Ip) {
-	// 			mapping := FaasP2PMapping{
-	// 				FaasClient: client,
-	// 				P2PID:      p2pID,
-	// 			}
-	// 			faasP2PMappingList = append(faasP2PMappingList, mapping)
-	// 			break
-	// 		}
-	// 	}
 
-	// 	// testFaasClient(client)
-	// }
 	return kubeP2PMappingList
 }
 

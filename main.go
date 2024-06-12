@@ -133,21 +133,23 @@ func main() {
 		if err != nil {
 			log.Fatalf("Error building OpenFaaS clientset: %s", err.Error())
 		}
-		// store in setup
-		ip := ""
-		if i == 0 {
-			ip = selfSetupIP
-		} else {
-			parsedURL, _ := url.Parse(clientCmdConfig.Host)
-			ip, _, _ = net.SplitHostPort(parsedURL.Host)
-		}
-		setups[ip] = serverSetup{
+		// store clients into setups
+		setup := serverSetup{
 			// all the config remain same
 			config:     config,
 			kubeClient: kubeClient,
 			faasClient: faasClient,
 		}
+		if i == 0 {
+			setups[selfSetupIP] = setup
+		} else {
+			parsedURL, _ := url.Parse(clientCmdConfig.Host)
+			ip, _, _ := net.SplitHostPort(parsedURL.Host)
+			setups[ip] = setup
+		}
+
 	}
+	log.Printf("Server setup %v\n", setups)
 
 	runController(setups)
 }
@@ -275,9 +277,9 @@ func runController(setups map[string]serverSetup) {
 	ipKubeMapping := make(map[string]catalog.KubeP2PMapping)
 	var functionList *k8s.FunctionList = nil
 	operator := false
+	// set up signals so we handle the first shutdown signal gracefully
+	stopCh := signals.SetupSignalHandler()
 	for ip, setup := range setups {
-		// set up signals so we handle the first shutdown signal gracefully
-		stopCh := signals.SetupSignalHandler()
 		kubeInformerOpt := kubeinformers.WithNamespace(config.DefaultFunctionNamespace)
 		kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(setup.kubeClient, defaultResync, kubeInformerOpt)
 		faasInformerOpt := informers.WithNamespace(config.DefaultFunctionNamespace)
@@ -324,7 +326,7 @@ func runController(setups map[string]serverSetup) {
 	promClient := initPromClient()
 	go node.ListenUpdateInfo(&promClient)
 
-	kubeP2PMappingList := catalog.NewKubeP2PMappingList(ipKubeMapping, c)
+	kubeP2PMappingList := catalog.NewKubeP2PMappingList(ipKubeMapping, selfSetupIP, c)
 	localKubeP2PMapping := ipKubeMapping[selfSetupIP]
 
 	// create a handle a pass the config into, so the closure can hold the config

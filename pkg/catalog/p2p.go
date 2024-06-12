@@ -18,6 +18,7 @@ import (
 // const pubKeySelf = "/tmp/faasd-p2p/pubKey"
 const privKeySelf = "/opt/p2p/privKey"
 const faasProtocolID = protocol.ID("/faas-initialize/1.0.0")
+const faasP2PIp = "0.0.0.0"
 const faasP2PPort = "30828"
 
 func InitInfoNetwork(c Catalog) error {
@@ -81,7 +82,7 @@ func newLibp2pHost() host.Host {
 }
 func getMultiaddr() string {
 	// ip, port := os.Getenv("FAAS_P2P_IP"), os.Getenv("FAAS_P2P_PORT")
-	ip := types.ParseString(os.Getenv("FAAS_P2P_IP"), "0.0.0.0")
+	ip := types.ParseString(os.Getenv("FAAS_P2P_IP"), faasP2PIp)
 	port := types.ParseString(os.Getenv("FAAS_P2P_PORT"), faasP2PPort)
 	multiaddr := fmt.Sprintf("/ip4/%s/udp/%s/quic-v1", ip, port)
 
