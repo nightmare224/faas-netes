@@ -90,36 +90,6 @@ package catalog
 // }
 
 // // put it from the fastest client to slowest client
-// // func rankClientsByRTT(clients []*sdk.Client) {
-
-// // 	// make this run every
-// // 	var sortedRTTClients []*sdk.Client
-// // 	var RTTs []time.Duration
-// // 	RTTtoIdx := make(map[time.Duration]int)
-// // 	for idx, client := range clients {
-// // 		startTime := time.Now()
-// // 		conn, err := net.DialTimeout("tcp", client.GatewayURL.Host, 5*time.Second)
-// // 		if err != nil {
-// // 			fmt.Printf("Measure RTT TCP connection error: %s", err.Error())
-// // 		}
-// // 		rtt := time.Since(startTime)
-// // 		conn.Close()
-// // 		RTTtoIdx[rtt] = idx
-// // 		RTTs = append(RTTs, rtt)
-// // 		fmt.Println("RTT: ", rtt, "URL: ", client.GatewayURL.Host)
-// // 	}
-// // 	slices.Sort(RTTs)
-// // 	for _, rtt := range RTTs {
-// // 		sortedRTTClients = append(sortedRTTClients, clients[RTTtoIdx[rtt]])
-// // 	}
-// // 	// copy back to original array
-// // 	for i, client := range sortedRTTClients {
-// // 		clients[i] = client
-// // 	}
-
-// // }
-
-// // put it from the fastest client to slowest client
 // func rankClientsByRTT(faasP2PMappingList FaasP2PMappingList) {
 
 // 	// TODO: make this run periodically?
@@ -162,15 +132,6 @@ package catalog
 // 	}
 
 // }
-
-// // func testFaasClient(client *sdk.Client) {
-// // 	fns, err := client.GetFunctions(context.Background(), "openfaas-fn")
-// // 	if err != nil {
-// // 		log.Printf("test error: %s", err)
-// // 		return
-// // 	}
-// // 	log.Println(fns)
-// // }
 
 // func newFaasClients(selfIP string) []*sdk.Client {
 // 	var faasClients []*sdk.Client

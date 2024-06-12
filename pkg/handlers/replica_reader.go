@@ -27,7 +27,7 @@ const MaxReplicas = 5
 const MaxFunctions = 15
 
 // MakeReplicaReader reads the amount of replicas for a deployment
-func MakeReplicaReader(defaultNamespace string, listers []v1.DeploymentLister, c catalog.Catalog) http.HandlerFunc {
+func MakeReplicaReader(defaultNamespace string, c catalog.Catalog) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		vars := mux.Vars(r)

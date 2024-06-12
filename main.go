@@ -8,12 +8,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io/fs"
 	"log"
 	"net"
 	"net/url"
-	"os"
-	"path/filepath"
 	"slices"
 	"sync/atomic"
 	"time"
@@ -34,7 +31,6 @@ import (
 
 	promapi "github.com/prometheus/client_golang/api"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeinformers "k8s.io/client-go/informers"
 	v1apps "k8s.io/client-go/informers/apps/v1"
 	v1core "k8s.io/client-go/informers/core/v1"
@@ -55,6 +51,7 @@ import (
 )
 
 const defaultResync = time.Hour * 10
+const selfSetupIP = "0.0.0.0"
 
 func main() {
 	var kubeconfig string
@@ -86,135 +83,69 @@ func main() {
 		log.Fatalf("Error checking connectivity, OpenFaaS CE cannot be run in an offline environment: %s", err.Error())
 	}
 
+	// TODO: can be bettter
 	var clientCmdConfigs []*rest.Config
-	clusterIDSet := make(map[string]struct{})
+	// clusterIDSet := make(map[string]struct{})
 	if kubeconfigPath != "" {
-
-		config, errConfig := rest.InClusterConfig()
-		if errConfig == nil {
-			clientCmdConfigs = append(clientCmdConfigs, config)
-			clusterID := getClusterIdentifier(config)
-			clusterIDSet[clusterID] = struct{}{}
-		}
-
-		err := filepath.WalkDir(kubeconfigPath, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			fi, _ := os.Lstat(path)
-			if (fi.Mode()&fs.ModeSymlink == 0) && !d.IsDir() {
-				config, err := clientcmd.BuildConfigFromFlags("", path)
-				if err != nil {
-					log.Fatalf("Error building kubeconfig: %s", err.Error())
-				}
-				fmt.Println("cluster ID: ", getClusterIdentifier(config))
-				clusterID := getClusterIdentifier(config)
-				if _, exists := clusterIDSet[clusterID]; !exists {
-					clusterIDSet[clusterID] = struct{}{}
-					clientCmdConfigs = append(clientCmdConfigs, config)
-					fmt.Printf("Host: %s, APIPath: %s\n", clientCmdConfigs[len(clientCmdConfigs)-1].Host, clientCmdConfigs[len(clientCmdConfigs)-1].APIPath)
-				}
-			}
-
-			return nil
-		})
+		configs, err := catalog.NewKubeConfig(kubeconfigPath)
 		if err != nil {
 			log.Fatalf("Error building kubeconfig path: %s", err.Error())
+			panic(err)
 		}
-
-		// measure distance of cluster
-		clientCmdConfigs = measureRTT(clientCmdConfigs)
-
+		clientCmdConfigs = append(clientCmdConfigs, configs...)
 	} else {
 		config, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
 		if err != nil {
 			log.Fatalf("Error building kubeconfig: %s", err.Error())
 		}
-		clientCmdConfigs = append(clientCmdConfigs, config)
+		clientCmdConfigs = []*rest.Config{config}
 	}
+
 	fmt.Println("ClientCmdConfigs len:", len(clientCmdConfigs))
-	// debug
-	// fmt.Printf("debug msg, masterURL: %s", masterURL)
-	// fmt.Printf("debug msg, APIPath: %s, Host: %s\n", clientCmdConfig.APIPath, clientCmdConfig.Host)
 
-	// number of config
-	numConfig := len(clientCmdConfigs)
-	kubeconfigQPS := 100
-	kubeconfigBurst := 250
-	kubeClients := make([]*kubernetes.Clientset, numConfig)
-	faasClients := make([]*clientset.Clientset, numConfig)
-	for i := 0; i < numConfig; i++ {
-		// create kubeClients
-		clientCmdConfigs[i].QPS = float32(kubeconfigQPS)
-		clientCmdConfigs[i].Burst = kubeconfigBurst
-		kubeClient, err := kubernetes.NewForConfig(clientCmdConfigs[i])
-		if err != nil {
-			log.Fatalf("Error building Kubernetes clientset: %s", err.Error())
-		}
-		kubeClients[i] = kubeClient
-
-		//create faasClients
-		faasClient, err := clientset.NewForConfig(clientCmdConfigs[i])
-		if err != nil {
-			log.Fatalf("Error building OpenFaaS clientset: %s", err.Error())
-		}
-		faasClients[i] = faasClient
-	}
-
+	// set config
 	readConfig := config.ReadConfig{}
 	osEnv := providertypes.OsEnv{}
 	config, err := readConfig.Read(osEnv)
-
 	if err != nil {
 		log.Fatalf("Error reading config: %s", err.Error())
 	}
-
 	config.Fprint(verbose)
-
-	deployConfig := k8s.DeploymentConfig{
-		RuntimeHTTPPort: 8080,
-		HTTPProbe:       config.HTTPProbe,
-		SetNonRootUser:  config.SetNonRootUser,
-		ReadinessProbe: &k8s.ProbeConfig{
-			InitialDelaySeconds: int32(2),
-			TimeoutSeconds:      int32(1),
-			PeriodSeconds:       int32(2),
-		},
-		LivenessProbe: &k8s.ProbeConfig{
-			InitialDelaySeconds: int32(2),
-			TimeoutSeconds:      int32(1),
-			PeriodSeconds:       int32(2),
-		},
-	}
-
-	namespaceScope := config.DefaultFunctionNamespace
-
-	if namespaceScope == "" {
+	if config.DefaultFunctionNamespace == "" {
 		klog.Fatal("DefaultFunctionNamespace must be set")
 	}
 
-	kubeInformerFactories := make([]kubeinformers.SharedInformerFactory, numConfig)
-	faasInformerFactories := make([]informers.SharedInformerFactory, numConfig)
-	factories := make([]k8s.FunctionFactory, numConfig)
-	for i := 0; i < numConfig; i++ {
-		kubeInformerOpt := kubeinformers.WithNamespace(namespaceScope)
-		kubeInformerFactories[i] = kubeinformers.NewSharedInformerFactoryWithOptions(kubeClients[i], defaultResync, kubeInformerOpt)
-
-		faasInformerOpt := informers.WithNamespace(namespaceScope)
-		faasInformerFactories[i] = informers.NewSharedInformerFactoryWithOptions(faasClients[i], defaultResync, faasInformerOpt)
-
-		factories[i] = k8s.NewFunctionFactory(kubeClients[i], deployConfig, faasClients[i].OpenfaasV1())
-	}
-
-	setups := make([]serverSetup, numConfig)
-	for i := 0; i < numConfig; i++ {
-		setups[i] = serverSetup{
-			config:              config,
-			functionFactory:     factories[i],
-			kubeInformerFactory: kubeInformerFactories[i],
-			faasInformerFactory: faasInformerFactories[i],
-			kubeClient:          kubeClients[i],
-			faasClient:          faasClients[i],
+	// setups
+	kubeconfigQPS := 100
+	kubeconfigBurst := 250
+	setups := make(map[string]serverSetup, len(clientCmdConfigs))
+	// for i := 0; i < numConfig; i++ {
+	for i, clientCmdConfig := range clientCmdConfigs {
+		// create kubeClients
+		clientCmdConfig.QPS = float32(kubeconfigQPS)
+		clientCmdConfig.Burst = kubeconfigBurst
+		kubeClient, err := kubernetes.NewForConfig(clientCmdConfig)
+		if err != nil {
+			log.Fatalf("Error building Kubernetes clientset: %s", err.Error())
+		}
+		//create faasClients
+		faasClient, err := clientset.NewForConfig(clientCmdConfig)
+		if err != nil {
+			log.Fatalf("Error building OpenFaaS clientset: %s", err.Error())
+		}
+		// store in setup
+		ip := ""
+		if i == 0 {
+			ip = selfSetupIP
+		} else {
+			parsedURL, _ := url.Parse(clientCmdConfig.Host)
+			ip, _, _ = net.SplitHostPort(parsedURL.Host)
+		}
+		setups[ip] = serverSetup{
+			// all the config remain same
+			config:     config,
+			kubeClient: kubeClient,
+			faasClient: faasClient,
 		}
 	}
 
@@ -228,19 +159,6 @@ type customInformers struct {
 }
 type customPlatformInformers struct {
 	ServiceInformer v1core.ServiceInformer
-}
-
-// user openfaas namespace uuid as cluster id
-func getClusterIdentifier(config *rest.Config) string {
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.Fatalf("Error building Kubernetes clientset: %s", err.Error())
-	}
-	namespace, err := clientset.CoreV1().Namespaces().Get(context.TODO(), "openfaas", metav1.GetOptions{})
-	if err != nil {
-		log.Fatalf("Error get openfaas namespace: %s", err.Error())
-	}
-	return string(namespace.UID)
 }
 
 func measureRTT(clientCmdConfigs []*rest.Config) []*rest.Config {
@@ -286,10 +204,7 @@ func measureRTT(clientCmdConfigs []*rest.Config) []*rest.Config {
 
 	return sortedRTTConfig
 }
-func startInformers(setup serverSetup, stopCh <-chan struct{}, operator bool) customInformers {
-	// assume the index 0 is the local cluster
-	kubeInformerFactory := setup.kubeInformerFactory
-	faasInformerFactory := setup.faasInformerFactory
+func startInformers(kubeInformerFactory kubeinformers.SharedInformerFactory, faasInformerFactory informers.SharedInformerFactory, stopCh <-chan struct{}, operator bool) customInformers {
 
 	var functions v1.FunctionInformer
 	if operator {
@@ -321,68 +236,83 @@ func startInformers(setup serverSetup, stopCh <-chan struct{}, operator bool) cu
 }
 
 // the informer for openfaas namespace not openfaas-fn namespace
-func startPlatformInformers(kubeClient *kubernetes.Clientset, stopCh <-chan struct{}) customPlatformInformers {
-	namespaceScope := "openfaas"
-	kubeInformerOpt := kubeinformers.WithNamespace(namespaceScope)
-	kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClient, defaultResync, kubeInformerOpt)
+// func startPlatformInformers(kubeClient *kubernetes.Clientset, stopCh <-chan struct{}) customPlatformInformers {
+// 	namespaceScope := "openfaas"
+// 	kubeInformerOpt := kubeinformers.WithNamespace(namespaceScope)
+// 	kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClient, defaultResync, kubeInformerOpt)
 
-	// kubeInformerFactory := setup.kubeInformerFactory
-	services := kubeInformerFactory.Core().V1().Services()
-	go services.Informer().Run(stopCh)
-	if ok := cache.WaitForNamedCacheSync("faas-netes:services", stopCh, services.Informer().HasSynced); !ok {
-		log.Fatalf("failed to wait for cache to sync")
-	}
+// 	// kubeInformerFactory := setup.kubeInformerFactory
+// 	services := kubeInformerFactory.Core().V1().Services()
+// 	go services.Informer().Run(stopCh)
+// 	if ok := cache.WaitForNamedCacheSync("faas-netes:services", stopCh, services.Informer().HasSynced); !ok {
+// 		log.Fatalf("failed to wait for cache to sync")
+// 	}
 
-	return customPlatformInformers{
-		ServiceInformer: services,
-	}
-}
+// 	return customPlatformInformers{
+// 		ServiceInformer: services,
+// 	}
+// }
 
 // runController runs the faas-netes imperative controller
-func runController(setup []serverSetup) {
-	// assume the index 0 is the local one
-	config := setup[0].config
-	kubeClient := setup[0].kubeClient
-	factory := setup[0].functionFactory
-	//fmt.Println(factory.Client.NodeV1().RESTClient().Get())
-	// set up signals so we handle the first shutdown signal gracefully
-	stopCh := signals.SetupSignalHandler()
+func runController(setups map[string]serverSetup) {
+	config := setups[selfSetupIP].config
+	deployConfig := k8s.DeploymentConfig{
+		RuntimeHTTPPort: 8080,
+		HTTPProbe:       config.HTTPProbe,
+		SetNonRootUser:  config.SetNonRootUser,
+		ReadinessProbe: &k8s.ProbeConfig{
+			InitialDelaySeconds: int32(2),
+			TimeoutSeconds:      int32(1),
+			PeriodSeconds:       int32(2),
+		},
+		LivenessProbe: &k8s.ProbeConfig{
+			InitialDelaySeconds: int32(2),
+			TimeoutSeconds:      int32(1),
+			PeriodSeconds:       int32(2),
+		},
+	}
+
+	ipKubeMapping := make(map[string]catalog.KubeP2PMapping)
+	var functionList *k8s.FunctionList = nil
 	operator := false
-	informers := startInformers(setup[0], stopCh, operator)
-	// serviceInformer := startPlatformInformers(setup[0].kubeClient, stopCh).ServiceInformer
-	handlers.RegisterEventHandlers(informers.DeploymentInformer, kubeClient, config.DefaultFunctionNamespace)
-	deployLister := informers.DeploymentInformer.Lister()
-	// serviceLister := serviceInformer.Lister()
-	// TODO, the first one might also being remote
-	functionLookup := k8s.NewFunctionLookup(config.DefaultFunctionNamespace, informers.EndpointsInformer.Lister())
-	// functionLookup := k8s.NewFunctionLookupRemote(kubeClient) //should also use remote resover if it is not in localhost cluster
-	functionList := k8s.NewFunctionList(config.DefaultFunctionNamespace, deployLister)
+	for ip, setup := range setups {
+		// set up signals so we handle the first shutdown signal gracefully
+		stopCh := signals.SetupSignalHandler()
+		kubeInformerOpt := kubeinformers.WithNamespace(config.DefaultFunctionNamespace)
+		kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(setup.kubeClient, defaultResync, kubeInformerOpt)
+		faasInformerOpt := informers.WithNamespace(config.DefaultFunctionNamespace)
+		faasInformerFactory := informers.NewSharedInformerFactoryWithOptions(setup.faasClient, defaultResync, faasInformerOpt)
+		informers := startInformers(kubeInformerFactory, faasInformerFactory, stopCh, operator)
+		handlers.RegisterEventHandlers(informers.DeploymentInformer, setup.kubeClient, config.DefaultFunctionNamespace)
 
-	factories := make([]k8s.FunctionFactory, len(setup))
-	factories[0] = factory
-	kubeClients := make([]*kubernetes.Clientset, len(setup))
-	kubeClients[0] = kubeClient
-	// for external cluster
-	deployListers := make([]v1appslisters.DeploymentLister, len(setup))
-	deployListers[0] = deployLister
-	functionLookupInterfaces := make([]proxy.BaseURLResolver, len(setup))
-	functionLookupInterfaces[0] = functionLookup
-	//functionLists := make([]*k8s.FunctionList, len(setup))
-	//functionLists[0] = functionList
-	// external cluster
+		// create deploy lister
+		deployLister := informers.DeploymentInformer.Lister()
 
-	for i := 1; i < len(setup); i++ {
-		factories[i] = setup[i].functionFactory
-		kubeClients[i] = setup[i].kubeClient
-		operator := false
-		externalInformers := startInformers(setup[i], stopCh, operator)
-		deployListers[i] = externalInformers.DeploymentInformer.Lister()
-		functionLookupInterfaces[i] = k8s.NewFunctionLookupRemote(kubeClients[i])
+		// create function resolver, assume the index 0 is the local one
+		var invokeResolver proxy.BaseURLResolver
+		p2pid := ""
+		if ip == selfSetupIP {
+			invokeResolver = k8s.NewFunctionLookup(config.DefaultFunctionNamespace, informers.EndpointsInformer.Lister())
+			functionList = k8s.NewFunctionList(config.DefaultFunctionNamespace, deployLister)
+			// set the self p2p id now
+			p2pid = catalog.NewCatalog().GetSelfCatalogKey()
+		} else {
+			invokeResolver = k8s.NewFunctionLookupRemote(setup.kubeClient)
+		}
+
+		ipKubeMapping[ip] = catalog.KubeP2PMapping{
+			KubeClient:     setup.kubeClient,
+			Factory:        k8s.NewFunctionFactory(setups[ip].kubeClient, deployConfig, setups[ip].faasClient.OpenfaasV1()),
+			DeployLister:   deployLister,
+			InvokeResolver: invokeResolver,
+			// fill in later
+			P2PID: p2pid,
+		}
 	}
 
 	// create the catalog to store p
 	c := catalog.NewCatalog()
-	node := initSelfCatagory(c, config.DefaultFunctionNamespace, deployLister)
+	node := initSelfCatagory(c, config.DefaultFunctionNamespace, ipKubeMapping[selfSetupIP].DeployLister)
 	// create catalog
 	InitNetworkErr := catalog.InitInfoNetwork(c)
 	if InitNetworkErr != nil {
@@ -394,23 +324,26 @@ func runController(setup []serverSetup) {
 	promClient := initPromClient()
 	go node.ListenUpdateInfo(&promClient)
 
+	kubeP2PMappingList := catalog.NewKubeP2PMappingList(ipKubeMapping, c)
+	localKubeP2PMapping := ipKubeMapping[selfSetupIP]
+
 	// create a handle a pass the config into, so the closure can hold the config
 	// printFunctionExecutionTime := true
 	bootstrapHandlers := providertypes.FaaSHandlers{
 		// FunctionProxy:  proxy.NewHandlerFunc(config.FaaSConfig, functionLookupInterfaces, printFunctionExecutionTime),
-		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, functionLookupInterfaces, deployListers, factories, kubeClients),
-		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, kubeClient, c),
+		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, kubeP2PMappingList, c),
+		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, localKubeP2PMapping.KubeClient, c),
 		// deploy on local cluster (index[0])
-		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, factory, functionList, kubeClient, c),
+		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, localKubeP2PMapping.Factory, functionList, localKubeP2PMapping.KubeClient, c),
 		FunctionLister: handlers.MakeFunctionReader(config.DefaultFunctionNamespace, c),
-		FunctionStatus: handlers.MakeReplicaReader(config.DefaultFunctionNamespace, deployListers, c),
-		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, kubeClient),
-		UpdateFunction: handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, factory),
+		FunctionStatus: handlers.MakeReplicaReader(config.DefaultFunctionNamespace, c),
+		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, localKubeP2PMapping.KubeClient),
+		UpdateFunction: handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, localKubeP2PMapping.Factory),
 		Health:         handlers.MakeHealthHandler(node),
 		Info:           handlers.MakeInfoHandler(version.BuildVersion(), version.GitCommit),
-		Secrets:        handlers.MakeSecretHandler(config.DefaultFunctionNamespace, kubeClient),
-		Logs:           logs.NewLogHandlerFunc(k8s.NewLogRequestor(kubeClient, config.DefaultFunctionNamespace), config.FaaSConfig.WriteTimeout),
-		ListNamespaces: handlers.MakeNamespacesLister(config.DefaultFunctionNamespace, kubeClient),
+		Secrets:        handlers.MakeSecretHandler(config.DefaultFunctionNamespace, localKubeP2PMapping.KubeClient),
+		Logs:           logs.NewLogHandlerFunc(k8s.NewLogRequestor(localKubeP2PMapping.KubeClient, config.DefaultFunctionNamespace), config.FaaSConfig.WriteTimeout),
+		ListNamespaces: handlers.MakeNamespacesLister(config.DefaultFunctionNamespace, localKubeP2PMapping.KubeClient),
 	}
 
 	ctx := context.Background()
@@ -421,12 +354,12 @@ func runController(setup []serverSetup) {
 // serverSetup is a container for the config and clients needed to start the
 // faas-netes controller or operator
 type serverSetup struct {
-	config              config.BootstrapConfig
-	kubeClient          *kubernetes.Clientset
-	faasClient          *clientset.Clientset
-	functionFactory     k8s.FunctionFactory
-	kubeInformerFactory kubeinformers.SharedInformerFactory
-	faasInformerFactory informers.SharedInformerFactory
+	config     config.BootstrapConfig
+	kubeClient *kubernetes.Clientset
+	faasClient *clientset.Clientset
+	// functionFactory     k8s.FunctionFactory
+	// kubeInformerFactory kubeinformers.SharedInformerFactory
+	// faasInformerFactory informers.SharedInformerFactory
 }
 
 func initSelfCatagory(c catalog.Catalog, functionNamespace string, deploymentLister v1appslisters.DeploymentLister) *catalog.Node {

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
@@ -11,156 +10,153 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/openfaas/faas-netes/pkg/k8s"
+	weightedrand "github.com/mroth/weightedrand/v2"
+	"github.com/openfaas/faas-netes/pkg/catalog"
 	fhttputil "github.com/openfaas/faas-provider/httputil"
 	"github.com/openfaas/faas-provider/proxy"
 	types "github.com/openfaas/faas-provider/types"
-	appsv1 "k8s.io/api/apps/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	v1 "k8s.io/client-go/listers/apps/v1"
 )
 
 // Make this able to search for other cluster's function.
 // And if other cluster exist the function, them deploy it on current local one
 // and trigger on local cluster
-func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, resolvers []proxy.BaseURLResolver, deploymentListers []v1.DeploymentLister, factories []k8s.FunctionFactory, clientsets []*kubernetes.Clientset) http.HandlerFunc {
+func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, kubeP2PMappingList catalog.KubeP2PMappingList, c catalog.Catalog) http.HandlerFunc {
 	// MakeReplicaReader(functionNamespace, deploymentListers[0])
 	// secrets := k8s.NewSecretsClient(factory.Client)
 	// resolver := resolvers[0]
 
+	enableOffload := false
 	return func(w http.ResponseWriter, r *http.Request) {
 		// multi cluster scenario
 		fmt.Println("URL:", r.URL.Host, r.URL.Path)
-		var resolver proxy.BaseURLResolver = resolvers[0]
 		// means in multi cluster scenario
-		if len(deploymentListers) > 1 {
-			vars := mux.Vars(r)
-			functionName := vars["name"]
+		if enableOffload && !isOffloadRequest(r) {
+			// vars := mux.Vars(r)
+			// functionName := vars["name"]
+			// if strings.Contains(vars["name"], ".") {
+			// 	functionName = strings.TrimSuffix(vars["name"], "."+functionNamespace)
+			// }
+			// targetFunction, targetNodeMapping, err := findSuitableNode(functionName, kubeP2PMappingList, c)
+			// if err != nil {
+			// 	fmt.Printf("Unable to trigger function: %v\n", err.Error())
+			// 	http.Error(w, err.Error(), http.StatusInternalServerError)
+			// 	return
+			// }
+			// // fmt.Println("deploy target: ", deployCluster, "offload target:", offloadCluster)
+			// // no deploy required, just trigger
+			// if targetFunction != nil {
+			// 	deployment := types.FunctionDeployment{
+			// 		Service:                targetFunction.Name,
+			// 		Image:                  targetFunction.Image,
+			// 		Namespace:              targetFunction.Namespace,
+			// 		EnvProcess:             targetFunction.EnvProcess,
+			// 		EnvVars:                targetFunction.EnvVars,
+			// 		Constraints:            targetFunction.Constraints,
+			// 		Secrets:                targetFunction.Secrets,
+			// 		Labels:                 targetFunction.Labels,
+			// 		Annotations:            targetFunction.Annotations,
+			// 		Limits:                 targetFunction.Limits,
+			// 		Requests:               targetFunction.Requests,
+			// 		ReadOnlyRootFilesystem: targetFunction.ReadOnlyRootFilesystem,
+			// 	}
+			// 	targetNodeMapping.FaasClient.Deploy(context.Background(), deployment)
+			// 	// TODO: wait unitl the function ready
+			// }
 
-			targetFunction, deployCluster, offloadCluster, err := findSuitableCluster(functionNamespace, functionName, resolvers, deploymentListers)
-			if err != nil {
-				fmt.Printf("Unable to trigger function: %v", err.Error())
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			fmt.Println("deploy target: ", deployCluster, "offload target:", offloadCluster)
-			if deployCluster != -1 {
-				deployNewFunction := func() {
-					deployment := types.FunctionDeployment{
-						Service:                targetFunction.Name,
-						Image:                  targetFunction.Image,
-						Namespace:              targetFunction.Namespace,
-						EnvProcess:             targetFunction.EnvProcess,
-						EnvVars:                targetFunction.EnvVars,
-						Constraints:            targetFunction.Constraints,
-						Secrets:                targetFunction.Secrets,
-						Labels:                 targetFunction.Labels,
-						Annotations:            targetFunction.Annotations,
-						Limits:                 targetFunction.Limits,
-						Requests:               targetFunction.Requests,
-						ReadOnlyRootFilesystem: targetFunction.ReadOnlyRootFilesystem,
-					}
-					functionList := k8s.NewFunctionList(functionNamespace, deploymentListers[deployCluster])
-					err, httpStatusCode := makeFunction(functionNamespace, factories[deployCluster], functionList, deployment)
-					if err != nil {
-						fmt.Printf("Unable to make function: %v", err.Error())
-						http.Error(w, err.Error(), httpStatusCode)
-						return
-					}
-				}
-				if deployCluster == offloadCluster {
-					deployNewFunction()
-					// wait until it done, and then offload
-					watch, err := clientsets[deployCluster].AppsV1().Deployments(functionNamespace).Watch(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("faas_function=%s", functionName)})
-					if err != nil {
-						fmt.Printf("Unable to watch function: %v", err.Error())
-						http.Error(w, err.Error(), http.StatusInternalServerError)
-						return
-					}
-					for event := range watch.ResultChan() {
-						dep, ok := event.Object.(*appsv1.Deployment)
-						if !ok {
-							continue
-						}
-						if dep.Status.ReadyReplicas >= 1 {
-							fmt.Println("Deployment is ready")
-							watch.Stop()
-							break
-						}
-					}
-				} else {
-					// TODO: maybe see is RTT bigger, overload bigger or the cold start
-					defer deployNewFunction()
-				}
-			}
-			// trigger the function
-			OffloadRequest(w, r, config, resolvers[offloadCluster])
+			// invokeResolver := kubeP2PMappingList[0].InvokeResolver
+			// if targetNodeMapping.P2PID != c.GetSelfCatalogKey() {
+			// 	invokeResolver = &targetNodeMapping
+			// }
+			// offloadRequest(w, r, config, invokeResolver)
 		} else {
-			proxy.NewHandlerFunc(config, resolver, true)(w, r)
+			// the index 0 is assume to be the local one
+			proxy.NewHandlerFunc(config, kubeP2PMappingList[0].InvokeResolver, true)(w, r)
 		}
-
-		// if (*targetFunction.Annotations)["workload-type"] == "model-decomposition" {
-		// 	modelDecomposition()
-		// } else {
-		// 	fmt.Println("Normal workload")
-		// }
 
 	}
 }
+func markAsOffloadRequest(r *http.Request) {
+	r.URL.RawQuery = "offload=1"
+}
+func isOffloadRequest(r *http.Request) bool {
+	offload := r.URL.Query().Get("offload")
 
-// func modelDecomposition() {
-// 	fmt.Println("model decomposition")
+	// If there are no values associated with the key, Get returns the empty string
+	return offload == "1"
+}
+
+// return the select p2pid to execution function based on last weighted exec time
+func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalog.Node) (string, error) {
+
+	// var choices []*weightedrand.Chooser[T, W]
+	var execTimeProd int64 = 1
+	p2pIDExecTimeMapping := make(map[string]int64)
+	for p2pID, node := range NodeCatalog {
+		// skip the overload node
+		if node.Overload {
+			continue
+		}
+		if _, exist := node.AvailableFunctionsReplicas[functionName]; exist {
+			// no execTime record yet, just gave one (in fact it already init as 1)
+			// execTime := time.Duration(1)
+			// if t, exist := node.FunctionExecutionTime[functionName]; exist {
+			// execTime = t
+			execTime := node.FunctionExecutionTime[functionName].Load()
+			execTimeProd *= execTime
+			// }
+			p2pIDExecTimeMapping[p2pID] = execTime
+		}
+	}
+
+	// all the node with funtion is overload
+	if len(p2pIDExecTimeMapping) == 0 {
+		return "", fmt.Errorf("no non-overloaded node to execution function: %s", functionName)
+	}
+
+	choices := make([]weightedrand.Choice[string, int64], 0)
+	// rightProd := make([]time.Duration, len(leftProd))
+	// rightProd[len(leftProd)-1] = 1
+	// for i := len(execTimeList) - 1; i >= 0; i-- {
+	// 	choices = append(choices, weightedrand.NewChoice(p2pIDList[i], rightProd[i]*leftProd[i]))
+	// 	rightProd[i-1] = rightProd[i] * execTimeList[i]
+	// }
+
+	for p2pID, execTime := range p2pIDExecTimeMapping {
+		probability := execTimeProd / execTime
+		choices = append(choices, weightedrand.NewChoice(p2pID, probability))
+		// fmt.Printf("exec time map %s: %s (probability: %s)\n", p2pID, execTime, probability)
+	}
+	chooser, _ := weightedrand.NewChooser(
+		choices...,
+	)
+
+	return chooser.Pick(), nil
+}
+
+// find the information of functionstatus, and found the one can be deployed/triggered this function
+// if the first parameter is nil, mean do not require deploy before trigger
+// func findSuitableNode(functionName string, kubeP2PMappingList catalog.KubeP2PMappingList, c catalog.Catalog) (*types.FunctionStatus, catalog.FaasP2PMapping, error) {
+
+// 	targetFunction, exist := c.FunctionCatalog[functionName]
+// 	if !exist {
+// 		err := fmt.Errorf("no endpoints available for: %s", functionName)
+// 		return nil, catalog.KubeP2PMapping{}, err
+// 	}
+// 	p2pID, err := weightExecTimeScheduler(functionName, c.NodeCatalog)
+// 	// if can not found the suitable node to execute function, report the first non-overload node
+// 	if err != nil {
+// 		for p2pID, node := range c.NodeCatalog {
+// 			if !node.Overload {
+// 				return targetFunction, kubeP2PMappingList.GetByP2PID(p2pID), nil
+// 			}
+// 		}
+// 	}
+
+// 	return nil, faasP2PMappingList.GetByP2PID(p2pID), nil
 // }
 
-func findSuitableCluster(functionNamespace string, functionName string, resolvers []proxy.BaseURLResolver, deploymentListers []v1.DeploymentLister) (*types.FunctionStatus, int, int, error) {
-	var targetFunction *types.FunctionStatus = nil
-
-	availableCluster := len(deploymentListers)
-	for i, lister := range deploymentListers {
-		function, err := getService(functionNamespace, functionName, lister)
-		if err != nil {
-			fmt.Println(err.Error())
-		}
-		if function != nil {
-			targetFunction = function
-		}
-		overload := false
-		err = nil
-		if i == 0 {
-			overload, err = MeasurePressure()
-		} else {
-			overload, err = GetExertnalPressure(resolvers[i])
-		}
-		if err != nil {
-			err := fmt.Errorf("unable to measure pressure: %v", err.Error())
-			return nil, -1, -1, err
-		}
-		// cluster available
-		if !overload {
-			// cluster has function on it
-			if function != nil {
-				// cluster is the best choice
-				if i < availableCluster {
-					// offload function, deploy cluster, trigger cluster, error
-					return nil, -1, i, nil
-				} else {
-					return targetFunction, availableCluster, i, nil
-				}
-			}
-			availableCluster = min(i, availableCluster)
-		}
-	}
-	if targetFunction == nil {
-		err := fmt.Errorf("no endpoints available for: %s", functionName)
-		return nil, -1, -1, err
-	}
-
-	return targetFunction, availableCluster, availableCluster, nil
-}
-
 // maybe in other place when the platform is overload the request can be redirect
-func OffloadRequest(w http.ResponseWriter, r *http.Request, config types.FaaSConfig, resolver proxy.BaseURLResolver) {
+func offloadRequest(w http.ResponseWriter, r *http.Request, config types.FaaSConfig, resolver proxy.BaseURLResolver) {
 	if resolver == nil {
 		panic("NewHandlerFunc: empty proxy handler resolver, cannot be nil")
 	}
