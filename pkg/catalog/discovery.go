@@ -74,7 +74,7 @@ func staticDiscovery(n *faasNotifiee) error {
 				Addrs: []ma.Multiaddr{maddr},
 			}
 			// this is when found peer subjectly, not objectly
-			// TODO: if it already have instance than don't need to do this subjectly
+			// if it already have instance than don't need to do this subjectly
 			if _, exist := n.c.NodeCatalog[peerID.String()]; !exist {
 				log.Printf("Do the handle peer found from pi %s\n", peerID)
 				go n.HandlePeerFound(pi)
@@ -99,15 +99,7 @@ func extractIP4fromMultiaddr(maddr ma.Multiaddr) string {
 }
 
 func (n *faasNotifiee) HandlePeerFound(pi peer.AddrInfo) {
-	log.Printf("Discovered new peer %s\n", pi.ID)
-
-	// create the instance in catalog and then connect,
-	// to prevent the connect function call this function again
-	// init the catagory for the find peer
-	infoRoomName := pi.ID.String()
-	node := NewNode()
-	node.Ip = extractIP4fromMultiaddr(pi.Addrs[0])
-	n.c.NodeCatalog[infoRoomName] = &node
+	log.Printf("Enter HandlePeer Found at peer %s\n", pi.ID)
 
 	// make sure the connection with peer, if already connected would not connect aggain
 	ctx := context.Background()
@@ -115,14 +107,6 @@ func (n *faasNotifiee) HandlePeerFound(pi peer.AddrInfo) {
 	if err != nil {
 		log.Printf("error connecting to peer %s, ignore this peer", err)
 		return
-	}
-
-	// subscribe to the room of remote peer
-	// TODO: Subscribe to the publish room  after reconnect
-	_, subErr := subscribeInfoRoom(ctx, n.ps, infoRoomName, n.h.ID(), n.c)
-	if subErr != nil {
-		err := fmt.Errorf("error subcribe to info room: %s", subErr)
-		log.Fatal(err)
 	}
 
 }
@@ -167,13 +151,22 @@ func (n *faasNotifiee) Connected(network network.Network, conn network.Conn) {
 	log.Printf("Peer Connected: %s\n", remotePeer)
 	// if the is new peer than do the handler peer found first
 	if _, exist := n.c.NodeCatalog[remotePeer.String()]; !exist {
-		pi := peer.AddrInfo{
-			ID:    remotePeer,
-			Addrs: []ma.Multiaddr{conn.RemoteMultiaddr()},
-		}
-		n.HandlePeerFound(pi)
+		// init the catagory for the connected peer
+		node := NewNode()
+		node.Ip = extractIP4fromMultiaddr(conn.RemoteMultiaddr())
+		n.c.NodeCatalog[remotePeer.String()] = &node
 	}
-	// if do not do it concurrently, the peers will block to try new stream at the same time
+
+	// subscribe to reomte peer room if not yet subscribe
+	if infoRoomName := remotePeer.String(); !n.hasSubscribed(infoRoomName) {
+		_, subErr := subscribeInfoRoom(context.Background(), n.ps, infoRoomName, n.h.ID(), n.c)
+		if subErr != nil {
+			err := fmt.Errorf("error subcribe to info room: %s", subErr)
+			log.Fatal(err)
+		}
+	}
+
+	// Send the current node information, if do not do it concurrently, the peers will block to try new stream at the same time
 	go func() {
 		stream, err := n.h.NewStream(context.Background(), remotePeer, faasProtocolID)
 		if err != nil {
@@ -200,4 +193,15 @@ func (n *faasNotifiee) Connected(network network.Network, conn network.Conn) {
 func (n *faasNotifiee) Disconnected(network network.Network, conn network.Conn) {
 	log.Printf("Encounter disconnected from %s", conn.RemotePeer())
 	// TODO: maybe clean the available replica during disconnect, or just delete entire node?
+}
+
+func (n *faasNotifiee) hasSubscribed(infoRoomName string) bool {
+
+	for _, topicName := range n.ps.GetTopics() {
+		if topicName == infoRoomName {
+			return true
+		}
+	}
+
+	return false
 }
