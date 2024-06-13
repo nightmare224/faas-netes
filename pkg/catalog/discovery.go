@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -22,6 +23,7 @@ import (
 const DiscoveryServiceTag = "faasd-localcluster"
 const pubKeyPeerPath = "/opt/p2p/pubKey-peer/"
 const mode = "static" //or mdns
+const maxRetriesConnection = 10
 
 // discoveryNotifee gets notified when we find a new peer via mDNS discovery
 type faasNotifiee struct {
@@ -102,13 +104,19 @@ func (n *faasNotifiee) HandlePeerFound(pi peer.AddrInfo) {
 	log.Printf("Enter HandlePeer Found at peer %s\n", pi.ID)
 
 	// make sure the connection with peer, if already connected would not connect aggain
-	ctx := context.Background()
-	err := n.h.Connect(ctx, pi)
-	if err != nil {
-		log.Printf("error connecting to peer %s, ignore this peer", err)
-		return
+	for i := 0; i < maxRetriesConnection; i++ {
+		ctx := context.Background()
+		err := n.h.Connect(ctx, pi)
+		if err == nil {
+			log.Printf("Connect to peer %s succeed", pi.ID)
+			return
+		}
+		log.Printf("error connecting to peer %s, retry: %s", err, i)
+		// exponential wait
+		time.Sleep(time.Duration(i<<1) * time.Second)
 	}
 
+	log.Printf("error connecting to peer %s, ignore")
 }
 
 // func InitAvailableFunctions(host host.Host, peerID peer.ID) {
