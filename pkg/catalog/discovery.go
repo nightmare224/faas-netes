@@ -41,6 +41,7 @@ func setupDiscovery(h host.Host, ps *pubsub.PubSub, c Catalog) error {
 	case "static":
 		notifee := &faasNotifiee{h: h, ps: ps, c: c}
 		h.Network().Notify(notifee)
+		//TODO: maybe should be go rooutine, just like mdns
 		return staticDiscovery(notifee)
 	case "mdns":
 		s := mdns.NewMdnsService(h, DiscoveryServiceTag, &faasNotifiee{h: h, ps: ps, c: c})
@@ -73,7 +74,11 @@ func staticDiscovery(n *faasNotifiee) error {
 				Addrs: []ma.Multiaddr{maddr},
 			}
 			// this is when found peer subjectly, not objectly
-			n.HandlePeerFound(pi)
+			// TODO: if it already have instance than don't need to do this subjectly
+			if _, exist := n.c.NodeCatalog[peerID.String()]; !exist {
+				log.Printf("Do the handle peer found from pi %s\n", peerID)
+				go n.HandlePeerFound(pi)
+			}
 		}
 
 		return nil
@@ -95,20 +100,25 @@ func extractIP4fromMultiaddr(maddr ma.Multiaddr) string {
 
 func (n *faasNotifiee) HandlePeerFound(pi peer.AddrInfo) {
 	log.Printf("Discovered new peer %s\n", pi.ID)
-	infoRoomName := pi.ID.String()
+
 	// create the instance in catalog and then connect,
 	// to prevent the connect function call this function again
 	// init the catagory for the find peer
+	infoRoomName := pi.ID.String()
 	node := NewNode()
 	node.Ip = extractIP4fromMultiaddr(pi.Addrs[0])
 	n.c.NodeCatalog[infoRoomName] = &node
+
+	// make sure the connection with peer, if already connected would not connect aggain
 	ctx := context.Background()
 	err := n.h.Connect(ctx, pi)
 	if err != nil {
-		err := fmt.Errorf("error connecting to peer %s", err)
-		log.Fatal(err)
+		log.Printf("error connecting to peer %s, ignore this peer", err)
+		return
 	}
 
+	// subscribe to the room of remote peer
+	// TODO: Subscribe to the publish room  after reconnect
 	_, subErr := subscribeInfoRoom(ctx, n.ps, infoRoomName, n.h.ID(), n.c)
 	if subErr != nil {
 		err := fmt.Errorf("error subcribe to info room: %s", subErr)
@@ -152,9 +162,9 @@ func (n *faasNotifiee) ListenClose(network network.Network, maddr ma.Multiaddr) 
 // send the initial available function if the new peer join
 func (n *faasNotifiee) Connected(network network.Network, conn network.Conn) {
 	// fmt.Println("Peer store:", n.h.Peerstore().Peers())
-	// if do not do it concurrently, the peers will block to try new stream at the same time
+
 	remotePeer := conn.RemotePeer()
-	fmt.Printf("New Peer Join: %s\n", remotePeer)
+	log.Printf("Peer Connected: %s\n", remotePeer)
 	// if the is new peer than do the handler peer found first
 	if _, exist := n.c.NodeCatalog[remotePeer.String()]; !exist {
 		pi := peer.AddrInfo{
@@ -163,6 +173,7 @@ func (n *faasNotifiee) Connected(network network.Network, conn network.Conn) {
 		}
 		n.HandlePeerFound(pi)
 	}
+	// if do not do it concurrently, the peers will block to try new stream at the same time
 	go func() {
 		stream, err := n.h.NewStream(context.Background(), remotePeer, faasProtocolID)
 		if err != nil {
@@ -181,11 +192,12 @@ func (n *faasNotifiee) Connected(network network.Network, conn network.Conn) {
 			log.Fatalf("Failed to send message: %v", err)
 			return
 		}
-		fmt.Println("Message sent to specific peer")
+		log.Printf("Message stream to peer %s", remotePeer)
 	}()
 
 }
 
 func (n *faasNotifiee) Disconnected(network network.Network, conn network.Conn) {
-
+	log.Printf("Encounter disconnected from %s", conn.RemotePeer())
+	// TODO: maybe clean the available replica during disconnect, or just delete entire node?
 }

@@ -31,17 +31,18 @@ func InitInfoNetwork(c Catalog) error {
 		c.streamAvailableFunctions(stream)
 	})
 
-	// discovery the other host and join their room
-	err := setupDiscovery(host, ps, c)
-	if err != nil {
-		return err
-	}
-
 	// create a info room as itself ID
 	ir, err := subscribeInfoRoom(ctx, ps, host.ID().String(), host.ID(), c)
 	if err != nil {
 		return err
 	}
+
+	// discovery the other host and join their room
+	discoveryErr := setupDiscovery(host, ps, c)
+	if discoveryErr != nil {
+		return discoveryErr
+	}
+
 	// the info of itself
 	if _, exist := c.NodeCatalog[selfCatagoryKey]; exist {
 		c.NodeCatalog[selfCatagoryKey].NodeMetadata = NodeMetadata{
