@@ -109,14 +109,23 @@ func (n *faasNotifiee) HandlePeerFound(pi peer.AddrInfo) {
 		err := n.h.Connect(ctx, pi)
 		if err == nil {
 			log.Printf("Connect to peer %s succeed", pi.ID)
+			// subscribe to reomte peer room if not yet subscribe
+			if infoRoomName := pi.ID.String(); !n.hasSubscribed(infoRoomName) {
+				_, subErr := subscribeInfoRoom(context.Background(), n.ps, infoRoomName, n.h.ID(), n.c)
+				if subErr != nil {
+					err := fmt.Errorf("error subcribe to info room: %s", subErr)
+					log.Fatal(err)
+				}
+			}
 			return
 		}
-		log.Printf("error connecting to peer %s, retry: %s", err, i)
+		log.Printf("error connecting to peer %s, retry: %d", err, i)
 		// exponential wait
 		time.Sleep(time.Duration(i<<1) * time.Second)
 	}
 
-	log.Printf("error connecting to peer %s, ignore")
+	log.Printf("error connecting to peer %s, ignore", pi.ID)
+
 }
 
 // func InitAvailableFunctions(host host.Host, peerID peer.ID) {
@@ -165,15 +174,6 @@ func (n *faasNotifiee) Connected(network network.Network, conn network.Conn) {
 		n.c.NodeCatalog[remotePeer.String()] = &node
 	}
 
-	// subscribe to reomte peer room if not yet subscribe
-	if infoRoomName := remotePeer.String(); !n.hasSubscribed(infoRoomName) {
-		_, subErr := subscribeInfoRoom(context.Background(), n.ps, infoRoomName, n.h.ID(), n.c)
-		if subErr != nil {
-			err := fmt.Errorf("error subcribe to info room: %s", subErr)
-			log.Fatal(err)
-		}
-	}
-
 	// Send the current node information, if do not do it concurrently, the peers will block to try new stream at the same time
 	go func() {
 		stream, err := n.h.NewStream(context.Background(), remotePeer, faasProtocolID)
@@ -199,7 +199,17 @@ func (n *faasNotifiee) Connected(network network.Network, conn network.Conn) {
 }
 
 func (n *faasNotifiee) Disconnected(network network.Network, conn network.Conn) {
-	log.Printf("Encounter disconnected from %s", conn.RemotePeer())
+
+	log.Printf(
+		"Encounter disconnected from %s, Status %v, Is closed %v\n"+
+			"Connected peer of topic %s: %v\n"+
+			"Connected peer of topic %s: %v\n"+
+			"hasSubscribed: %v\n",
+		conn.RemotePeer(), conn.ConnState(), conn.IsClosed(),
+		n.h.ID().String(), n.ps.ListPeers(n.h.ID().String()),
+		conn.RemotePeer().String(), n.ps.ListPeers(conn.RemotePeer().String()),
+		n.hasSubscribed(conn.RemotePeer().String()))
+
 	// TODO: maybe clean the available replica during disconnect, or just delete entire node?
 }
 
