@@ -11,7 +11,6 @@ import (
 	"log"
 	"net"
 	"net/url"
-	"slices"
 	"sync/atomic"
 	"time"
 
@@ -163,49 +162,6 @@ type customPlatformInformers struct {
 	ServiceInformer v1core.ServiceInformer
 }
 
-func measureRTT(clientCmdConfigs []*rest.Config) []*rest.Config {
-
-	var sortedRTTConfig []*rest.Config
-	// check if there is local cluster
-	kubeconfig, err := rest.InClusterConfig()
-
-	localhost := ""
-	if err == nil {
-		sortedRTTConfig = append(sortedRTTConfig, kubeconfig)
-		localhost = kubeconfig.Host
-		fmt.Println("Localhost Cluster IP: ", localhost)
-	}
-	RTTtoIdx := make(map[time.Duration]int)
-	var RTTs []time.Duration
-	for idx, config := range clientCmdConfigs {
-		// ignore the localhost config as it is already added
-
-		if config.Host != localhost {
-			startTime := time.Now()
-			parsedURL, _ := url.Parse(config.Host)
-			// fmt.Println(config.Host, parsedURL.Host)
-			conn, err := net.DialTimeout("tcp", parsedURL.Host, 5*time.Second)
-			if err != nil {
-				fmt.Printf("Measure RTT TCP connection error: %s", err.Error())
-			}
-			rtt := time.Since(startTime)
-			conn.Close()
-			// for testing
-			// if config.Host == "https://10.211.55.25:6443" {
-			// 	rtt = 0
-			// }
-			RTTtoIdx[rtt] = idx
-			RTTs = append(RTTs, rtt)
-			fmt.Println("RTT: ", rtt, "URL: ", config.Host)
-		}
-	}
-	slices.Sort(RTTs)
-	for _, rtt := range RTTs {
-		sortedRTTConfig = append(sortedRTTConfig, clientCmdConfigs[RTTtoIdx[rtt]])
-	}
-
-	return sortedRTTConfig
-}
 func startInformers(kubeInformerFactory kubeinformers.SharedInformerFactory, faasInformerFactory informers.SharedInformerFactory, stopCh <-chan struct{}, operator bool) customInformers {
 
 	var functions v1.FunctionInformer
@@ -236,24 +192,6 @@ func startInformers(kubeInformerFactory kubeinformers.SharedInformerFactory, faa
 		FunctionsInformer:  functions,
 	}
 }
-
-// the informer for openfaas namespace not openfaas-fn namespace
-// func startPlatformInformers(kubeClient *kubernetes.Clientset, stopCh <-chan struct{}) customPlatformInformers {
-// 	namespaceScope := "openfaas"
-// 	kubeInformerOpt := kubeinformers.WithNamespace(namespaceScope)
-// 	kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClient, defaultResync, kubeInformerOpt)
-
-// 	// kubeInformerFactory := setup.kubeInformerFactory
-// 	services := kubeInformerFactory.Core().V1().Services()
-// 	go services.Informer().Run(stopCh)
-// 	if ok := cache.WaitForNamedCacheSync("faas-netes:services", stopCh, services.Informer().HasSynced); !ok {
-// 		log.Fatalf("failed to wait for cache to sync")
-// 	}
-
-// 	return customPlatformInformers{
-// 		ServiceInformer: services,
-// 	}
-// }
 
 // runController runs the faas-netes imperative controller
 func runController(setups map[string]serverSetup) {

@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"time"
 
 	"github.com/openfaas/faas-netes/pkg/k8s"
 	"github.com/openfaas/faas-provider/proxy"
+	probing "github.com/prometheus-community/pro-bing"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	v1appslisters "k8s.io/client-go/listers/apps/v1"
@@ -73,7 +77,8 @@ func NewKubeP2PMappingList(ipKubeMapping map[string]KubeP2PMapping, selfIp strin
 
 	// put itself in to list, which the local one already fill the p2p id
 	kubeP2PMappingList := KubeP2PMappingList{ipKubeMapping[selfIp]}
-
+	// TODO: this is work around, to prevent the nodecatalog not yet init
+	time.Sleep(5 * time.Second)
 	for p2pID, p2pNode := range c.NodeCatalog {
 		if p2pID != c.GetSelfCatalogKey() {
 			kube, exist := ipKubeMapping[p2pNode.Ip]
@@ -85,7 +90,49 @@ func NewKubeP2PMappingList(ipKubeMapping map[string]KubeP2PMapping, selfIp strin
 		}
 	}
 
+	rankClientsByRTT(kubeP2PMappingList)
+
 	return kubeP2PMappingList
+}
+
+// put it from the fastest client to slowest client
+func rankClientsByRTT(kubeP2PMappingList KubeP2PMappingList) {
+
+	// TODO: make this run periodically?
+	var RTTs []time.Duration
+	RTTtoMapping := make(map[time.Duration]KubeP2PMapping)
+	for _, mapping := range kubeP2PMappingList {
+		// for itself it is 0
+		rtt := time.Duration(0)
+		if mapping.P2PID != selfCatagoryKey {
+			// not the local, will resolve the gateway url
+			gatewayURL, err := mapping.InvokeResolver.Resolve("")
+			if err != nil {
+				log.Fatal("failed to resolve gateway URL")
+			}
+			ip, _, _ := net.SplitHostPort(gatewayURL.Host)
+			pinger, err := probing.NewPinger(ip)
+			if err != nil {
+				panic(err)
+			}
+			pinger.Count = 3
+			err = pinger.Run() // Blocks until finished.
+			if err != nil {
+				panic(err)
+			}
+			stats := pinger.Statistics()
+			rtt = stats.AvgRtt
+		}
+		RTTtoMapping[rtt] = mapping
+		RTTs = append(RTTs, rtt)
+		fmt.Println("RTT: ", rtt, "P2P ID: ", mapping.P2PID)
+	}
+	slices.Sort(RTTs)
+	// copy back to original array
+	for i, rtt := range RTTs {
+		kubeP2PMappingList[i] = RTTtoMapping[rtt]
+	}
+
 }
 
 // user openfaas namespace uuid as cluster id
