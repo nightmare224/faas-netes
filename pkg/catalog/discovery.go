@@ -166,13 +166,10 @@ func (n *faasNotifiee) Connected(network network.Network, conn network.Conn) {
 
 	remotePeer := conn.RemotePeer()
 	log.Printf("Peer Connected: %s\n", remotePeer)
-	// if the is new peer than do the handler peer found first
-	if _, exist := n.c.NodeCatalog[remotePeer.String()]; !exist {
-		// init the catagory for the connected peer
-		node := NewNode()
-		node.Ip = extractIP4fromMultiaddr(conn.RemoteMultiaddr())
-		n.c.NodeCatalog[remotePeer.String()] = &node
-	}
+
+	// init the catagory for the connected peer
+	ip := extractIP4fromMultiaddr(conn.RemoteMultiaddr())
+	n.c.NewNodeCatalogEntry(remotePeer.String(), ip)
 
 	// Send the current node information, if do not do it concurrently, the peers will block to try new stream at the same time
 	go func() {

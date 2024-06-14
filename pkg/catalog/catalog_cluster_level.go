@@ -156,6 +156,12 @@ func (c Catalog) updatetReplicasWithFunctionName(functionName string) {
 // the handler of receive the initialization function info
 func (c Catalog) streamAvailableFunctions(stream network.Stream) {
 	defer stream.Close()
+
+	// Add nod to nodecatalog if the node not create yet
+	peerID := stream.Conn().RemotePeer().String()
+	ip := extractIP4fromMultiaddr(stream.Conn().RemoteMultiaddr())
+	c.NewNodeCatalogEntry(peerID, ip)
+
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, stream); err != nil {
 		log.Fatalf("Failed to read from stream: %v", err)
@@ -171,7 +177,7 @@ func (c Catalog) streamAvailableFunctions(stream network.Stream) {
 	fmt.Printf("Receive info from publisher %s stream: %v\n", stream.Conn().RemotePeer(), infoMsg)
 
 	// update the info in the node
-	unpackNodeInfoMsg(c, infoMsg, stream.Conn().RemotePeer().String())
+	unpackNodeInfoMsg(c, infoMsg, peerID)
 	// c[stream.Conn().RemotePeer().String()].NodeInfo = *info
 
 	// example

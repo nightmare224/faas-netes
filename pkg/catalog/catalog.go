@@ -80,13 +80,21 @@ func NewCatalog() Catalog {
 	}
 }
 
-func NewNode() Node {
+func NewNodeWithIp(ip string) Node {
 	return Node{
 		NodeInfo: NodeInfo{
 			AvailableFunctionsReplicas: make(map[string]uint64),
 			FunctionExecutionTime:      make(map[string]*atomic.Int64),
 		},
-		NodeMetadata: NodeMetadata{},
+		NodeMetadata: NodeMetadata{Ip: ip},
 		infoChan:     nil,
+	}
+}
+
+// add new node into Catalog.NodeCatalog for peerID, ignore if already exist
+func (c Catalog) NewNodeCatalogEntry(peerID string, ip string) {
+	if _, exist := c.NodeCatalog[peerID]; !exist {
+		node := NewNodeWithIp(ip)
+		c.NodeCatalog[peerID] = &node
 	}
 }

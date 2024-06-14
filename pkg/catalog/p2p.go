@@ -56,6 +56,10 @@ func InitInfoNetwork(c Catalog) error {
 	return nil
 }
 
+func GetSelfFaasP2PIp() string {
+	return faasP2PIp
+}
+
 func newLibp2pHost() host.Host {
 
 	privKeyData, err := os.ReadFile(privKeySelf)

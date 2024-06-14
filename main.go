@@ -372,8 +372,8 @@ func initSelfCatagory(c catalog.Catalog, functionNamespace string, deploymentLis
 		panic(err)
 	}
 
-	node := catalog.NewNode()
-	c.NodeCatalog[c.GetSelfCatalogKey()] = &node
+	c.NewNodeCatalogEntry(c.GetSelfCatalogKey(), catalog.GetSelfFaasP2PIp())
+
 	for i, fn := range fns {
 		// TODO: should be more sphofisticate
 		c.FunctionCatalog[fn.Name] = &fns[i]
