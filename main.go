@@ -12,31 +12,21 @@ import (
 	"net"
 	"net/url"
 	"sync/atomic"
-	"time"
 
 	"github.com/openfaas/faas-netes/pkg/catalog"
-	clientset "github.com/openfaas/faas-netes/pkg/client/clientset/versioned"
-	informers "github.com/openfaas/faas-netes/pkg/client/informers/externalversions"
-	v1 "github.com/openfaas/faas-netes/pkg/client/informers/externalversions/openfaas/v1"
+	"github.com/openfaas/faas-netes/pkg/signals"
+
 	"github.com/openfaas/faas-netes/pkg/config"
 	"github.com/openfaas/faas-netes/pkg/handlers"
 	"github.com/openfaas/faas-netes/pkg/k8s"
-	"github.com/openfaas/faas-netes/pkg/signals"
 	version "github.com/openfaas/faas-netes/version"
 	faasProvider "github.com/openfaas/faas-provider"
 	"github.com/openfaas/faas-provider/logs"
-	"github.com/openfaas/faas-provider/proxy"
 	providertypes "github.com/openfaas/faas-provider/types"
-
 	promapi "github.com/prometheus/client_golang/api"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
-	kubeinformers "k8s.io/client-go/informers"
-	v1apps "k8s.io/client-go/informers/apps/v1"
-	v1core "k8s.io/client-go/informers/core/v1"
-	"k8s.io/client-go/kubernetes"
-	v1appslisters "k8s.io/client-go/listers/apps/v1"
+
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
 
@@ -49,8 +39,8 @@ import (
 	// _ "sigs.k8s.io/controller-tools/cmd/controller-gen"
 )
 
-const defaultResync = time.Hour * 10
-const selfSetupIP = "0.0.0.0"
+// const defaultResync = time.Hour * 10
+// const selfSetupIP = "0.0.0.0"
 
 func main() {
 	var kubeconfig string
@@ -99,8 +89,20 @@ func main() {
 		}
 		clientCmdConfigs = []*rest.Config{config}
 	}
+	log.Println("ClientCmdConfigs len:", len(clientCmdConfigs))
 
-	fmt.Println("ClientCmdConfigs len:", len(clientCmdConfigs))
+	// map ip to config
+	clientCmdConfigMap := make(map[string]*rest.Config)
+	for i, clientCmdConfig := range clientCmdConfigs {
+		if i == 0 {
+			clientCmdConfigMap[catalog.GetSelfFaasP2PIp()] = clientCmdConfig
+		} else {
+			parsedURL, _ := url.Parse(clientCmdConfig.Host)
+			ip, _, _ := net.SplitHostPort(parsedURL.Host)
+			clientCmdConfigMap[ip] = clientCmdConfig
+		}
+	}
+	log.Println("ClientCmdConfigMap:", clientCmdConfigMap)
 
 	// set config
 	readConfig := config.ReadConfig{}
@@ -114,145 +116,24 @@ func main() {
 		klog.Fatal("DefaultFunctionNamespace must be set")
 	}
 
-	// setups
-	kubeconfigQPS := 100
-	kubeconfigBurst := 250
-	setups := make(map[string]serverSetup, len(clientCmdConfigs))
-	// for i := 0; i < numConfig; i++ {
-	for i, clientCmdConfig := range clientCmdConfigs {
-		// create kubeClients
-		clientCmdConfig.QPS = float32(kubeconfigQPS)
-		clientCmdConfig.Burst = kubeconfigBurst
-		kubeClient, err := kubernetes.NewForConfig(clientCmdConfig)
-		if err != nil {
-			log.Fatalf("Error building Kubernetes clientset: %s", err.Error())
-		}
-		//create faasClients
-		faasClient, err := clientset.NewForConfig(clientCmdConfig)
-		if err != nil {
-			log.Fatalf("Error building OpenFaaS clientset: %s", err.Error())
-		}
-		// store clients into setups
-		setup := serverSetup{
-			// all the config remain same
-			config:     config,
-			kubeClient: kubeClient,
-			faasClient: faasClient,
-		}
-		if i == 0 {
-			setups[selfSetupIP] = setup
-		} else {
-			parsedURL, _ := url.Parse(clientCmdConfig.Host)
-			ip, _, _ := net.SplitHostPort(parsedURL.Host)
-			setups[ip] = setup
-		}
-
-	}
-	log.Printf("Server setup %v\n", setups)
-
-	runController(setups)
-}
-
-type customInformers struct {
-	EndpointsInformer  v1core.EndpointsInformer
-	DeploymentInformer v1apps.DeploymentInformer
-	FunctionsInformer  v1.FunctionInformer
-}
-type customPlatformInformers struct {
-	ServiceInformer v1core.ServiceInformer
-}
-
-func startInformers(kubeInformerFactory kubeinformers.SharedInformerFactory, faasInformerFactory informers.SharedInformerFactory, stopCh <-chan struct{}, operator bool) customInformers {
-
-	var functions v1.FunctionInformer
-	if operator {
-		functions = faasInformerFactory.Openfaas().V1().Functions()
-		go functions.Informer().Run(stopCh)
-		if ok := cache.WaitForNamedCacheSync("faas-netes:functions", stopCh, functions.Informer().HasSynced); !ok {
-			log.Fatalf("failed to wait for cache to sync")
-		}
-	}
-	// start the informer for Kubernetes deployments in a new goroutine,
-	//and listen for events related to deployments until a stop signal is received through the stopCh channel
-	deployments := kubeInformerFactory.Apps().V1().Deployments()
-	go deployments.Informer().Run(stopCh)
-	if ok := cache.WaitForNamedCacheSync("faas-netes:deployments", stopCh, deployments.Informer().HasSynced); !ok {
-		log.Fatalf("failed to wait for cache to sync")
-	}
-
-	endpoints := kubeInformerFactory.Core().V1().Endpoints()
-	go endpoints.Informer().Run(stopCh)
-	if ok := cache.WaitForNamedCacheSync("faas-netes:endpoints", stopCh, endpoints.Informer().HasSynced); !ok {
-		log.Fatalf("failed to wait for cache to sync")
-	}
-
-	return customInformers{
-		EndpointsInformer:  endpoints,
-		DeploymentInformer: deployments,
-		FunctionsInformer:  functions,
-	}
+	runController(config, clientCmdConfigMap)
 }
 
 // runController runs the faas-netes imperative controller
-func runController(setups map[string]serverSetup) {
-	config := setups[selfSetupIP].config
-	deployConfig := k8s.DeploymentConfig{
-		RuntimeHTTPPort: 8080,
-		HTTPProbe:       config.HTTPProbe,
-		SetNonRootUser:  config.SetNonRootUser,
-		ReadinessProbe: &k8s.ProbeConfig{
-			InitialDelaySeconds: int32(2),
-			TimeoutSeconds:      int32(1),
-			PeriodSeconds:       int32(2),
-		},
-		LivenessProbe: &k8s.ProbeConfig{
-			InitialDelaySeconds: int32(2),
-			TimeoutSeconds:      int32(1),
-			PeriodSeconds:       int32(2),
-		},
-	}
+func runController(config config.BootstrapConfig, clientCmdConfigMap map[string]*rest.Config) {
 
-	ipKubeMapping := make(map[string]catalog.KubeP2PMapping)
-	var functionList *k8s.FunctionList = nil
+	// ipKubeMapping := make(map[string]catalog.KubeClient)
+	// var functionList *k8s.FunctionList = nil
 	operator := false
 	// set up signals so we handle the first shutdown signal gracefully
 	stopCh := signals.SetupSignalHandler()
-	for ip, setup := range setups {
-		kubeInformerOpt := kubeinformers.WithNamespace(config.DefaultFunctionNamespace)
-		kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(setup.kubeClient, defaultResync, kubeInformerOpt)
-		faasInformerOpt := informers.WithNamespace(config.DefaultFunctionNamespace)
-		faasInformerFactory := informers.NewSharedInformerFactoryWithOptions(setup.faasClient, defaultResync, faasInformerOpt)
-		informers := startInformers(kubeInformerFactory, faasInformerFactory, stopCh, operator)
-		handlers.RegisterEventHandlers(informers.DeploymentInformer, setup.kubeClient, config.DefaultFunctionNamespace)
 
-		// create deploy lister
-		deployLister := informers.DeploymentInformer.Lister()
-
-		// create function resolver, assume the index 0 is the local one
-		var invokeResolver proxy.BaseURLResolver
-		p2pid := ""
-		if ip == selfSetupIP {
-			invokeResolver = k8s.NewFunctionLookup(config.DefaultFunctionNamespace, informers.EndpointsInformer.Lister())
-			functionList = k8s.NewFunctionList(config.DefaultFunctionNamespace, deployLister)
-			// set the self p2p id now
-			p2pid = catalog.NewCatalog().GetSelfCatalogKey()
-		} else {
-			invokeResolver = k8s.NewFunctionLookupRemote(setup.kubeClient)
-		}
-
-		ipKubeMapping[ip] = catalog.KubeP2PMapping{
-			KubeClient:     setup.kubeClient,
-			Factory:        k8s.NewFunctionFactory(setups[ip].kubeClient, deployConfig, setups[ip].faasClient.OpenfaasV1()),
-			DeployLister:   deployLister,
-			InvokeResolver: invokeResolver,
-			// fill in later
-			P2PID: p2pid,
-		}
-	}
+	// create function
+	NewKubeClientWithIp := catalog.NewKubeClientWithIpGenerator(config, clientCmdConfigMap, stopCh, operator)
 
 	// create the catalog to store p
-	c := catalog.NewCatalog()
-	node := initSelfCatagory(c, config.DefaultFunctionNamespace, ipKubeMapping[selfSetupIP].DeployLister)
+	c := catalog.NewCatalog(NewKubeClientWithIp, len(clientCmdConfigMap))
+	node := initSelfCatagory(c, config.DefaultFunctionNamespace)
 	// create catalog
 	InitNetworkErr := catalog.InitInfoNetwork(c)
 	if InitNetworkErr != nil {
@@ -264,26 +145,27 @@ func runController(setups map[string]serverSetup) {
 	promClient := initPromClient()
 	go node.ListenUpdateInfo(&promClient)
 
-	kubeP2PMappingList := catalog.NewKubeP2PMappingList(ipKubeMapping, selfSetupIP, c)
-	localKubeP2PMapping := ipKubeMapping[selfSetupIP]
+	// kubeP2PMappingList := catalog.NewKubeP2PMappingList(ipKubeMapping, selfSetupIP, c)
+	localKubeClient := c.NodeCatalog[catalog.GetSelfCatalogKey()].KubeClient
+	localFunctionList := k8s.NewFunctionList(config.DefaultFunctionNamespace, localKubeClient.DeployLister)
 
 	// create a handle a pass the config into, so the closure can hold the config
 	// printFunctionExecutionTime := true
 	bootstrapHandlers := providertypes.FaaSHandlers{
 		// FunctionProxy:  proxy.NewHandlerFunc(config.FaaSConfig, functionLookupInterfaces, printFunctionExecutionTime),
-		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, kubeP2PMappingList, c),
-		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, localKubeP2PMapping.KubeClient, c),
+		FunctionProxy:  handlers.MakeTriggerHandler(config.DefaultFunctionNamespace, config.FaaSConfig, c),
+		DeleteFunction: handlers.MakeDeleteHandler(config.DefaultFunctionNamespace, localKubeClient.Clientset, c),
 		// deploy on local cluster (index[0])
-		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, localKubeP2PMapping.Factory, functionList, localKubeP2PMapping.KubeClient, c),
+		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, localKubeClient.Factory, localFunctionList, localKubeClient.Clientset, c),
 		FunctionLister: handlers.MakeFunctionReader(config.DefaultFunctionNamespace, c),
 		FunctionStatus: handlers.MakeReplicaReader(config.DefaultFunctionNamespace, c),
-		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, localKubeP2PMapping.KubeClient),
-		UpdateFunction: handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, localKubeP2PMapping.Factory),
+		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, localKubeClient.Clientset),
+		UpdateFunction: handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, localKubeClient.Factory),
 		Health:         handlers.MakeHealthHandler(node),
 		Info:           handlers.MakeInfoHandler(version.BuildVersion(), version.GitCommit),
-		Secrets:        handlers.MakeSecretHandler(config.DefaultFunctionNamespace, localKubeP2PMapping.KubeClient),
-		Logs:           logs.NewLogHandlerFunc(k8s.NewLogRequestor(localKubeP2PMapping.KubeClient, config.DefaultFunctionNamespace), config.FaaSConfig.WriteTimeout),
-		ListNamespaces: handlers.MakeNamespacesLister(config.DefaultFunctionNamespace, localKubeP2PMapping.KubeClient),
+		Secrets:        handlers.MakeSecretHandler(config.DefaultFunctionNamespace, localKubeClient.Clientset),
+		Logs:           logs.NewLogHandlerFunc(k8s.NewLogRequestor(localKubeClient.Clientset, config.DefaultFunctionNamespace), config.FaaSConfig.WriteTimeout),
+		ListNamespaces: handlers.MakeNamespacesLister(config.DefaultFunctionNamespace, localKubeClient.Clientset),
 	}
 
 	ctx := context.Background()
@@ -291,36 +173,26 @@ func runController(setups map[string]serverSetup) {
 	faasProvider.Serve(ctx, &bootstrapHandlers, &config.FaaSConfig)
 }
 
-// serverSetup is a container for the config and clients needed to start the
-// faas-netes controller or operator
-type serverSetup struct {
-	config     config.BootstrapConfig
-	kubeClient *kubernetes.Clientset
-	faasClient *clientset.Clientset
-	// functionFactory     k8s.FunctionFactory
-	// kubeInformerFactory kubeinformers.SharedInformerFactory
-	// faasInformerFactory informers.SharedInformerFactory
-}
+func initSelfCatagory(c catalog.Catalog, functionNamespace string) *catalog.Node {
+	c.NewNodeCatalogEntry(catalog.GetSelfCatalogKey(), catalog.GetSelfFaasP2PIp())
 
-func initSelfCatagory(c catalog.Catalog, functionNamespace string, deploymentLister v1appslisters.DeploymentLister) *catalog.Node {
 	// init available function to catalog
+	deploymentLister := c.NodeCatalog[catalog.GetSelfCatalogKey()].DeployLister
 	fns, err := handlers.ListFunctionStatus(functionNamespace, deploymentLister)
 	if err != nil {
 		fmt.Printf("cannot init available function: %s", err)
 		panic(err)
 	}
 
-	c.NewNodeCatalogEntry(c.GetSelfCatalogKey(), catalog.GetSelfFaasP2PIp())
-
 	for i, fn := range fns {
 		// TODO: should be more sphofisticate
 		c.FunctionCatalog[fn.Name] = &fns[i]
-		c.NodeCatalog[c.GetSelfCatalogKey()].AvailableFunctionsReplicas[fn.Name] = fn.AvailableReplicas
-		c.NodeCatalog[c.GetSelfCatalogKey()].FunctionExecutionTime[fn.Name] = new(atomic.Int64)
-		c.NodeCatalog[c.GetSelfCatalogKey()].FunctionExecutionTime[fn.Name].Store(1)
+		c.NodeCatalog[catalog.GetSelfCatalogKey()].AvailableFunctionsReplicas[fn.Name] = fn.AvailableReplicas
+		c.NodeCatalog[catalog.GetSelfCatalogKey()].FunctionExecutionTime[fn.Name] = new(atomic.Int64)
+		c.NodeCatalog[catalog.GetSelfCatalogKey()].FunctionExecutionTime[fn.Name].Store(1)
 	}
 
-	return c.NodeCatalog[c.GetSelfCatalogKey()]
+	return c.NodeCatalog[catalog.GetSelfCatalogKey()]
 }
 
 func initPromClient() promv1.API {

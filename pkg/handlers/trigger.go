@@ -20,7 +20,7 @@ import (
 // Make this able to search for other cluster's function.
 // And if other cluster exist the function, them deploy it on current local one
 // and trigger on local cluster
-func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, kubeP2PMappingList catalog.KubeP2PMappingList, c catalog.Catalog) http.HandlerFunc {
+func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c catalog.Catalog) http.HandlerFunc {
 	// MakeReplicaReader(functionNamespace, deploymentListers[0])
 	// secrets := k8s.NewSecretsClient(factory.Client)
 	// resolver := resolvers[0]
@@ -70,7 +70,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, kubeP
 			// offloadRequest(w, r, config, invokeResolver)
 		} else {
 			// the index 0 is assume to be the local one
-			proxy.NewHandlerFunc(config, kubeP2PMappingList[0].InvokeResolver, true)(w, r)
+			proxy.NewHandlerFunc(config, c.NodeCatalog[catalog.GetSelfCatalogKey()].InvokeResolver, true)(w, r)
 		}
 
 	}

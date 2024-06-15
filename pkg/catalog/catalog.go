@@ -31,8 +31,10 @@ const (
 
 type Catalog struct {
 	// to prevent reinsert for modify Node by using pointer
-	NodeCatalog     map[string]*Node
-	FunctionCatalog map[string]*types.FunctionStatus
+	NodeCatalog         map[string]*Node
+	FunctionCatalog     map[string]*types.FunctionStatus
+	SortedP2PID         []string
+	NewKubeClientWithIp NewKubeClientWithIpFunc
 }
 
 type NodeInfo struct {
@@ -55,6 +57,7 @@ type NodeMetadata struct {
 type Node struct {
 	NodeInfo
 	NodeMetadata
+	KubeClient
 	infoChan chan *NodeInfo
 }
 
@@ -63,7 +66,7 @@ type Node struct {
 // 	availableReplicas []map[string]uint64
 // }
 
-func (c Catalog) GetSelfCatalogKey() string {
+func GetSelfCatalogKey() string {
 	return selfCatagoryKey
 }
 
@@ -73,20 +76,23 @@ func (c Catalog) GetSelfCatalogKey() string {
 // publishInfo(c[selfCatagoryKey].infoChan, &c[selfCatagoryKey].NodeInfo)
 // }
 
-func NewCatalog() Catalog {
+func NewCatalog(newKubeClientWithIp NewKubeClientWithIpFunc, totalAmountKubeClient int) Catalog {
 	return Catalog{
-		NodeCatalog:     make(map[string]*Node),
-		FunctionCatalog: make(map[string]*types.FunctionStatus),
+		NodeCatalog:         make(map[string]*Node),
+		FunctionCatalog:     make(map[string]*types.FunctionStatus),
+		SortedP2PID:         make([]string, 0, totalAmountKubeClient),
+		NewKubeClientWithIp: newKubeClientWithIp,
 	}
 }
 
-func NewNodeWithIp(ip string) Node {
+func (c Catalog) NewNodeWithIp(ip string, p2pid string) Node {
 	return Node{
 		NodeInfo: NodeInfo{
 			AvailableFunctionsReplicas: make(map[string]uint64),
 			FunctionExecutionTime:      make(map[string]*atomic.Int64),
 		},
 		NodeMetadata: NodeMetadata{Ip: ip},
+		KubeClient:   c.NewKubeClientWithIp(ip, p2pid),
 		infoChan:     nil,
 	}
 }
@@ -94,7 +100,8 @@ func NewNodeWithIp(ip string) Node {
 // add new node into Catalog.NodeCatalog for peerID, ignore if already exist
 func (c Catalog) NewNodeCatalogEntry(peerID string, ip string) {
 	if _, exist := c.NodeCatalog[peerID]; !exist {
-		node := NewNodeWithIp(ip)
+		node := c.NewNodeWithIp(ip, peerID)
 		c.NodeCatalog[peerID] = &node
+		// c.RankNodeByRTT()
 	}
 }

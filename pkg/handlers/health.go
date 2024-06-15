@@ -5,13 +5,9 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
-	"log"
 	"net/http"
 
 	"github.com/openfaas/faas-netes/pkg/catalog"
-	"github.com/openfaas/faas-provider/proxy"
 )
 
 const (
@@ -49,31 +45,31 @@ func MakeHealthHandler(node *catalog.Node) http.HandlerFunc {
 	}
 }
 
-func GetExertnalPressure(resolver proxy.BaseURLResolver) (bool, error) {
+// func GetExertnalPressure(resolver proxy.BaseURLResolver) (bool, error) {
 
-	hostUrl, err := resolver.Resolve("")
-	if err != nil {
-		err := fmt.Errorf("unable to resolve remote host: %v", err)
-		return false, err
-	}
-	healthzUrl := fmt.Sprintf("%s/healthz?overload=1", hostUrl.String())
-	resp, err := http.Get(healthzUrl)
-	if err != nil {
-		err := fmt.Errorf("unable to get health: %v", err)
-		return false, err
-	}
-	defer resp.Body.Close()
+// 	hostUrl, err := resolver.Resolve("")
+// 	if err != nil {
+// 		err := fmt.Errorf("unable to resolve remote host: %v", err)
+// 		return false, err
+// 	}
+// 	healthzUrl := fmt.Sprintf("%s/healthz?overload=1", hostUrl.String())
+// 	resp, err := http.Get(healthzUrl)
+// 	if err != nil {
+// 		err := fmt.Errorf("unable to get health: %v", err)
+// 		return false, err
+// 	}
+// 	defer resp.Body.Close()
 
-	// defer upstreamCall.Body.Close()
+// 	// defer upstreamCall.Body.Close()
 
-	var health = CustomHealth{Overload: false}
+// 	var health = CustomHealth{Overload: false}
 
-	body, _ := io.ReadAll(resp.Body)
-	err = json.Unmarshal(body, &health)
-	if err != nil {
-		log.Printf("Error unmarshalling provider json from body %s. Error %s\n", body, err.Error())
-	}
+// 	body, _ := io.ReadAll(resp.Body)
+// 	err = json.Unmarshal(body, &health)
+// 	if err != nil {
+// 		log.Printf("Error unmarshalling provider json from body %s. Error %s\n", body, err.Error())
+// 	}
 
-	return health.Overload, nil
+// 	return health.Overload, nil
 
-}
+// }
