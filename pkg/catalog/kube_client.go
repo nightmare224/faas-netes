@@ -43,7 +43,6 @@ type KubeClient struct {
 func newKubeClientset(clientCmdConfig *rest.Config) *kubernetes.Clientset {
 	kubeconfigQPS := 100
 	kubeconfigBurst := 250
-
 	clientCmdConfig.QPS = float32(kubeconfigQPS)
 	clientCmdConfig.Burst = kubeconfigBurst
 	kubeClient, err := kubernetes.NewForConfig(clientCmdConfig)
@@ -140,7 +139,7 @@ func NewKubeClientWithIpGenerator(config config.BootstrapConfig, clientCmdConfig
 		if ip == GetSelfFaasP2PIp() {
 			invokeResolver = k8s.NewFunctionLookup(config.DefaultFunctionNamespace, informers.EndpointsInformer.Lister())
 		} else {
-			invokeResolver = k8s.NewFunctionLookupRemote(kubeClientset)
+			invokeResolver = k8s.NewFunctionLookupRemote(ip)
 		}
 
 		return KubeClient{
@@ -164,41 +163,23 @@ func (c Catalog) RankNodeByRTT() {
 		// for itself it is 0
 		rtt := time.Duration(0)
 		if p2pID != selfCatagoryKey {
-			// gatewayURL, err := p2pNode.InvokeResolver.Resolve("")
-			// if err != nil {
-			// 	log.Fatal("failed to resolve gateway URL")
-			// }
-			// ip, _, _ := net.SplitHostPort(gatewayURL.Host)
-
-			// log.Printf("ping %s\n", ip)
-			// pinger, err := probing.NewPinger(ip)
-			// if err != nil {
-			// 	panic(err)
-			// }
-			// pinger.Count = 3
-			// err = pinger.Run() // Blocks until finished.
-			// if err != nil {
-			// 	panic(err)
-			// }
-			// stats := pinger.Statistics()
-			// rtt = stats.AvgRtt
-
-			// TODO: using tcp might trigger the connected in discovery
 			startTime := time.Now()
-			ip := p2pNode.Ip
-			log.Printf("dial ip %s\n", ip)
-			conn, err := net.DialTimeout("tcp", ip, 5*time.Second)
+			// the path of faas gateway
+			url, _ := p2pNode.InvokeResolver.Resolve("")
+			ip, _, _ := net.SplitHostPort(url.Host)
+			// just try connect with the k8s api
+			conn, err := net.DialTimeout("tcp", ip+":6443", 5*time.Second)
 			if err != nil {
 				fmt.Printf("Measure RTT TCP connection error: %s", err.Error())
+				panic(err)
 			}
 			rtt = time.Since(startTime)
 			conn.Close()
 		}
 		RTTtoP2PID[rtt] = p2pID
-		fmt.Printf("RTTtoP2PID: %v\n", RTTtoP2PID)
 		RTTs = append(RTTs, rtt)
-		fmt.Println("RTT: ", rtt, "P2P ID: ", p2pID)
 	}
+	fmt.Printf("RTTtoP2PID: %v\n", RTTtoP2PID)
 	slices.Sort(RTTs)
 
 	// make the length fit with the number of node

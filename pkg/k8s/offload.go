@@ -15,16 +15,19 @@ type FunctionLookupRemote struct {
 	ExternalGateway  string
 }
 
-func NewFunctionLookupRemote(clientset *kubernetes.Clientset) *FunctionLookupRemote {
+// use the k8s api server ip, expect the openfaas service is nodeport service
+func NewFunctionLookupRemote(ip string) *FunctionLookupRemote {
 	return &FunctionLookupRemote{
-		ExternalGateway: exploreExternalGateway(clientset),
+		ExternalGateway: ip,
+		// ExternalGateway: exploreExternalGateway(clientset),
 	}
 }
 
-func (l *FunctionLookupRemote) Resolve(name string) (url.URL, error) {
+func (l FunctionLookupRemote) Resolve(name string) (url.URL, error) {
 	functionAddr := url.URL{
 		Scheme: "http",
-		Host:   l.ExternalGateway + ":80",
+		// might be 31112?
+		Host: l.ExternalGateway + ":31112",
 	}
 	// offload.buildProxyRequest
 	// proxyReq, err := proxy.buildProxyRequest(originalReq, functionAddr, pathVars["params"])
@@ -52,7 +55,3 @@ func exploreExternalGateway(clientset *kubernetes.Clientset) string {
 
 	return ""
 }
-
-// func clusterResourcePressure() {
-// 	//use endpoint /metrics to query the cluster pressure periodically
-// }

@@ -102,6 +102,6 @@ func (c Catalog) NewNodeCatalogEntry(peerID string, ip string) {
 	if _, exist := c.NodeCatalog[peerID]; !exist {
 		node := c.NewNodeWithIp(ip, peerID)
 		c.NodeCatalog[peerID] = &node
-		// c.RankNodeByRTT()
+		c.RankNodeByRTT()
 	}
 }

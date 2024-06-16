@@ -7,11 +7,14 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/mux"
 	weightedrand "github.com/mroth/weightedrand/v2"
 	"github.com/openfaas/faas-netes/pkg/catalog"
+	"github.com/openfaas/faas-netes/pkg/k8s"
 	fhttputil "github.com/openfaas/faas-provider/httputil"
 	"github.com/openfaas/faas-provider/proxy"
 	types "github.com/openfaas/faas-provider/types"
@@ -21,53 +24,47 @@ import (
 // And if other cluster exist the function, them deploy it on current local one
 // and trigger on local cluster
 func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c catalog.Catalog) http.HandlerFunc {
-	// MakeReplicaReader(functionNamespace, deploymentListers[0])
-	// secrets := k8s.NewSecretsClient(factory.Client)
-	// resolver := resolvers[0]
 
-	enableOffload := false
+	enableOffload := true
 	return func(w http.ResponseWriter, r *http.Request) {
-		// multi cluster scenario
-		fmt.Println("URL:", r.URL.Host, r.URL.Path)
 		// means in multi cluster scenario
 		if enableOffload && !isOffloadRequest(r) {
-			// vars := mux.Vars(r)
-			// functionName := vars["name"]
-			// if strings.Contains(vars["name"], ".") {
-			// 	functionName = strings.TrimSuffix(vars["name"], "."+functionNamespace)
-			// }
-			// targetFunction, targetNodeMapping, err := findSuitableNode(functionName, kubeP2PMappingList, c)
-			// if err != nil {
-			// 	fmt.Printf("Unable to trigger function: %v\n", err.Error())
-			// 	http.Error(w, err.Error(), http.StatusInternalServerError)
-			// 	return
-			// }
-			// // fmt.Println("deploy target: ", deployCluster, "offload target:", offloadCluster)
-			// // no deploy required, just trigger
-			// if targetFunction != nil {
-			// 	deployment := types.FunctionDeployment{
-			// 		Service:                targetFunction.Name,
-			// 		Image:                  targetFunction.Image,
-			// 		Namespace:              targetFunction.Namespace,
-			// 		EnvProcess:             targetFunction.EnvProcess,
-			// 		EnvVars:                targetFunction.EnvVars,
-			// 		Constraints:            targetFunction.Constraints,
-			// 		Secrets:                targetFunction.Secrets,
-			// 		Labels:                 targetFunction.Labels,
-			// 		Annotations:            targetFunction.Annotations,
-			// 		Limits:                 targetFunction.Limits,
-			// 		Requests:               targetFunction.Requests,
-			// 		ReadOnlyRootFilesystem: targetFunction.ReadOnlyRootFilesystem,
-			// 	}
-			// 	targetNodeMapping.FaasClient.Deploy(context.Background(), deployment)
-			// 	// TODO: wait unitl the function ready
-			// }
-
-			// invokeResolver := kubeP2PMappingList[0].InvokeResolver
-			// if targetNodeMapping.P2PID != c.GetSelfCatalogKey() {
-			// 	invokeResolver = &targetNodeMapping
-			// }
-			// offloadRequest(w, r, config, invokeResolver)
+			vars := mux.Vars(r)
+			functionName := vars["name"]
+			if strings.Contains(vars["name"], ".") {
+				functionName = strings.TrimSuffix(vars["name"], "."+functionNamespace)
+			}
+			targetFunction, targetP2PID, err := findSuitableNode(functionName, c)
+			if err != nil {
+				fmt.Printf("Unable to trigger function: %v\n", err.Error())
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			fmt.Println("trigger target:", targetP2PID)
+			// no deploy required, just trigger
+			if targetFunction != nil {
+				deployment := types.FunctionDeployment{
+					Service:                targetFunction.Name,
+					Image:                  targetFunction.Image,
+					Namespace:              targetFunction.Namespace,
+					EnvProcess:             targetFunction.EnvProcess,
+					EnvVars:                targetFunction.EnvVars,
+					Constraints:            targetFunction.Constraints,
+					Secrets:                targetFunction.Secrets,
+					Labels:                 targetFunction.Labels,
+					Annotations:            targetFunction.Annotations,
+					Limits:                 targetFunction.Limits,
+					Requests:               targetFunction.Requests,
+					ReadOnlyRootFilesystem: targetFunction.ReadOnlyRootFilesystem,
+				}
+				functionList := k8s.NewFunctionList(functionNamespace, c.NodeCatalog[targetP2PID].DeployLister)
+				makeFunction(functionNamespace, c.NodeCatalog[targetP2PID].Factory, functionList, deployment)
+				// TODO: wait unitl the function ready
+			}
+			// trigger the function here
+			// if non local than change the resolver
+			markAsOffloadRequest(r)
+			offloadRequest(w, r, config, c.NodeCatalog[targetP2PID].InvokeResolver, c.NodeCatalog[targetP2PID].FunctionExecutionTime)
 		} else {
 			// the index 0 is assume to be the local one
 			proxy.NewHandlerFunc(config, c.NodeCatalog[catalog.GetSelfCatalogKey()].InvokeResolver, true)(w, r)
@@ -135,28 +132,28 @@ func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalo
 
 // find the information of functionstatus, and found the one can be deployed/triggered this function
 // if the first parameter is nil, mean do not require deploy before trigger
-// func findSuitableNode(functionName string, kubeP2PMappingList catalog.KubeP2PMappingList, c catalog.Catalog) (*types.FunctionStatus, catalog.FaasP2PMapping, error) {
+func findSuitableNode(functionName string, c catalog.Catalog) (*types.FunctionStatus, string, error) {
 
-// 	targetFunction, exist := c.FunctionCatalog[functionName]
-// 	if !exist {
-// 		err := fmt.Errorf("no endpoints available for: %s", functionName)
-// 		return nil, catalog.KubeP2PMapping{}, err
-// 	}
-// 	p2pID, err := weightExecTimeScheduler(functionName, c.NodeCatalog)
-// 	// if can not found the suitable node to execute function, report the first non-overload node
-// 	if err != nil {
-// 		for p2pID, node := range c.NodeCatalog {
-// 			if !node.Overload {
-// 				return targetFunction, kubeP2PMappingList.GetByP2PID(p2pID), nil
-// 			}
-// 		}
-// 	}
+	targetFunction, exist := c.FunctionCatalog[functionName]
+	if !exist {
+		err := fmt.Errorf("no endpoints available for: %s", functionName)
+		return nil, "", err
+	}
+	p2pID, err := weightExecTimeScheduler(functionName, c.NodeCatalog)
+	// if can not found the suitable node to execute function, report the first non-overload node
+	if err != nil {
+		for p2pID, node := range c.NodeCatalog {
+			if !node.Overload {
+				return targetFunction, p2pID, nil
+			}
+		}
+	}
 
-// 	return nil, faasP2PMappingList.GetByP2PID(p2pID), nil
-// }
+	return nil, p2pID, nil
+}
 
 // maybe in other place when the platform is overload the request can be redirect
-func offloadRequest(w http.ResponseWriter, r *http.Request, config types.FaaSConfig, resolver proxy.BaseURLResolver) {
+func offloadRequest(w http.ResponseWriter, r *http.Request, config types.FaaSConfig, resolver proxy.BaseURLResolver, functionExecutionTime map[string]*atomic.Int64) {
 	if resolver == nil {
 		panic("NewHandlerFunc: empty proxy handler resolver, cannot be nil")
 	}
@@ -180,7 +177,7 @@ func offloadRequest(w http.ResponseWriter, r *http.Request, config types.FaaSCon
 
 	// only allow the Get and Post request
 	if r.Method == http.MethodPost || r.Method == http.MethodGet {
-		proxyRequest(w, r, proxyClient, resolver, &reverseProxy)
+		proxyRequest(w, r, proxyClient, resolver, &reverseProxy, functionExecutionTime)
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -193,7 +190,7 @@ const (
 )
 
 // proxyRequest handles the actual resolution of and then request to the function service.
-func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient *http.Client, resolver proxy.BaseURLResolver, reverseProxy *httputil.ReverseProxy) {
+func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient *http.Client, resolver proxy.BaseURLResolver, reverseProxy *httputil.ReverseProxy, functionExecutionTime map[string]*atomic.Int64) {
 	ctx := originalReq.Context()
 
 	pathVars := mux.Vars(originalReq)
@@ -234,7 +231,13 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	start := time.Now()
 	defer func() {
 		seconds := time.Since(start)
-		log.Printf("%s took %f seconds\n", functionName, seconds.Seconds())
+		// log.Printf("%s took %f seconds\n", functionName, seconds.Seconds())
+		actualFunctionName := functionName
+		if strings.Contains(functionName, ".") {
+			actualFunctionName = strings.TrimSuffix(functionName, "."+"openfaas-fn")
+		}
+		// does the update too often?
+		functionExecutionTime[actualFunctionName].Store(int64(seconds))
 	}()
 
 	if v := originalReq.Header.Get("Accept"); v == "text/event-stream" {
