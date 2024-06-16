@@ -89,7 +89,7 @@ func getMultiaddr() string {
 	// ip, port := os.Getenv("FAAS_P2P_IP"), os.Getenv("FAAS_P2P_PORT")
 	ip := types.ParseString(os.Getenv("FAAS_P2P_IP"), faasP2PIp)
 	port := types.ParseString(os.Getenv("FAAS_P2P_PORT"), faasP2PPort)
-	multiaddr := fmt.Sprintf("/ip4/%s/udp/%s/quic-v1", ip, port)
+	multiaddr := fmt.Sprintf("/ip4/%s/tcp/%s", ip, port)
 
 	return multiaddr
 }
