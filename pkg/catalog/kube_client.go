@@ -183,17 +183,16 @@ func (c Catalog) RankNodeByRTT() {
 		RTTtoP2PID[rtt] = p2pID
 		RTTs = append(RTTs, rtt)
 	}
-	log.Printf("RTTtoP2PID: %v\n", RTTtoP2PID)
-	log.Printf("Rtts: %v, cap of sortedp2pid map: %d\n", RTTs, cap(c.SortedP2PID))
+	// log.Printf("RTTtoP2PID: %v\n", RTTtoP2PID)
+	// log.Printf("Rtts: %v, cap of sortedp2pid map: %d\n", RTTs, cap(c.SortedP2PID))
 	slices.Sort(RTTs)
 
 	// make the length fit with the number of node
-	c.SortedP2PID = c.SortedP2PID[:len(RTTs)]
+	*c.SortedP2PID = (*c.SortedP2PID)[:len(RTTs)]
 	// copy back to original array
 	for i, rtt := range RTTs {
-		c.SortedP2PID[i] = RTTtoP2PID[rtt]
+		(*c.SortedP2PID)[i] = RTTtoP2PID[rtt]
 	}
-	log.Printf("sortedp2pid map: %v\n", c.SortedP2PID)
 }
 
 type customInformers struct {

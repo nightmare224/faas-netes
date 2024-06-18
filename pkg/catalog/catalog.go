@@ -33,7 +33,7 @@ type Catalog struct {
 	// to prevent reinsert for modify Node by using pointer
 	NodeCatalog         map[string]*Node
 	FunctionCatalog     map[string]*types.FunctionStatus
-	SortedP2PID         []string
+	SortedP2PID         *[]string
 	NewKubeClientWithIp NewKubeClientWithIpFunc
 }
 
@@ -76,11 +76,12 @@ func GetSelfCatalogKey() string {
 // publishInfo(c[selfCatagoryKey].infoChan, &c[selfCatagoryKey].NodeInfo)
 // }
 
-func NewCatalog(newKubeClientWithIp NewKubeClientWithIpFunc, totalAmountKubeClient int) Catalog {
+func NewCatalog(newKubeClientWithIp NewKubeClientWithIpFunc) Catalog {
+	sortedP2PID := make([]string, 0, totalAmountP2PPeer())
 	return Catalog{
 		NodeCatalog:         make(map[string]*Node),
 		FunctionCatalog:     make(map[string]*types.FunctionStatus),
-		SortedP2PID:         make([]string, 0, totalAmountKubeClient),
+		SortedP2PID:         &sortedP2PID,
 		NewKubeClientWithIp: newKubeClientWithIp,
 	}
 }

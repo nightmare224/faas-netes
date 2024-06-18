@@ -225,3 +225,9 @@ func (n *faasNotifiee) hasSubscribed(infoRoomName string) bool {
 
 	return false
 }
+
+func totalAmountP2PPeer() int {
+	dir, _ := os.ReadDir(pubKeyPeerPath)
+
+	return len(dir)
+}

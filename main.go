@@ -132,7 +132,7 @@ func runController(config config.BootstrapConfig, clientCmdConfigMap map[string]
 	NewKubeClientWithIp := catalog.NewKubeClientWithIpGenerator(config, clientCmdConfigMap, stopCh, operator)
 
 	// create the catalog to store p
-	c := catalog.NewCatalog(NewKubeClientWithIp, len(clientCmdConfigMap))
+	c := catalog.NewCatalog(NewKubeClientWithIp)
 	node := initSelfCatagory(c, config.DefaultFunctionNamespace)
 	// create catalog
 	InitNetworkErr := catalog.InitInfoNetwork(c)

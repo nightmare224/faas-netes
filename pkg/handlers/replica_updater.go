@@ -148,8 +148,8 @@ func scaleUp(functionName string, functionNamespace string, desiredReplicas int3
 	log.Printf("sorted p2 pid: %v\n", c.SortedP2PID)
 
 	// try scale up the function from near to far
-	for i := 0; i < len(c.SortedP2PID) && scaleUpCnt > 0; i++ {
-		p2pID := c.SortedP2PID[i]
+	for i := 0; i < len(*c.SortedP2PID) && scaleUpCnt > 0; i++ {
+		p2pID := (*c.SortedP2PID)[i]
 		// first try to scale up at local cluster
 		// deploy first if the function is not exist
 		availableFunctionsReplicas := int32(c.NodeCatalog[p2pID].AvailableFunctionsReplicas[functionName])
@@ -195,8 +195,8 @@ func scaleDown(functionName string, functionNamespace string, desiredReplicas in
 	scaleDownCnt := int32(c.FunctionCatalog[functionName].Replicas) - desiredReplicas
 
 	// remove the function from the far instance
-	for i := len(c.SortedP2PID) - 1; i >= 0 && scaleDownCnt > 0; i++ {
-		p2pID := c.SortedP2PID[i]
+	for i := len(*c.SortedP2PID) - 1; i >= 0 && scaleDownCnt > 0; i++ {
+		p2pID := (*c.SortedP2PID)[i]
 		availableFunctionsReplicas := int32(c.NodeCatalog[p2pID].AvailableFunctionsReplicas[functionName])
 		if availableFunctionsReplicas > 0 {
 			// the replica is more than the scale down count
