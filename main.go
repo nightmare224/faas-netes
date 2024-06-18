@@ -159,7 +159,7 @@ func runController(config config.BootstrapConfig, clientCmdConfigMap map[string]
 		DeployFunction: handlers.MakeDeployHandler(config.DefaultFunctionNamespace, localKubeClient.Factory, localFunctionList, localKubeClient.Clientset, c),
 		FunctionLister: handlers.MakeFunctionReader(config.DefaultFunctionNamespace, c),
 		FunctionStatus: handlers.MakeReplicaReader(config.DefaultFunctionNamespace, c),
-		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, localKubeClient.Clientset),
+		ScaleFunction:  handlers.MakeReplicaUpdater(config.DefaultFunctionNamespace, c),
 		UpdateFunction: handlers.MakeUpdateHandler(config.DefaultFunctionNamespace, localKubeClient.Factory),
 		Health:         handlers.MakeHealthHandler(node),
 		Info:           handlers.MakeInfoHandler(version.BuildVersion(), version.GitCommit),

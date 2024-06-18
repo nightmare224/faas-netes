@@ -119,7 +119,11 @@ func NewKubeClientWithIpGenerator(config config.BootstrapConfig, clientCmdConfig
 		},
 	}
 	return func(ip string, p2pID string) KubeClient {
-		clientCmdConfig := clientCmdConfigMap[ip]
+		clientCmdConfig, exist := clientCmdConfigMap[ip]
+		if !exist {
+			log.Printf("Cannot find the kubeclient config of ip %s\n", ip)
+			return KubeClient{P2PID: p2pID}
+		}
 		log.Printf("peer id: %s, target ip: %s, map: %v\n", p2pID, ip, clientCmdConfigMap)
 		kubeClientset := newKubeClientset(clientCmdConfig)
 		faasClientset := newFaasClientset(clientCmdConfig)
@@ -179,7 +183,8 @@ func (c Catalog) RankNodeByRTT() {
 		RTTtoP2PID[rtt] = p2pID
 		RTTs = append(RTTs, rtt)
 	}
-	fmt.Printf("RTTtoP2PID: %v\n", RTTtoP2PID)
+	log.Printf("RTTtoP2PID: %v\n", RTTtoP2PID)
+	log.Printf("Rtts: %v, cap of sortedp2pid map: %d\n", RTTs, cap(c.SortedP2PID))
 	slices.Sort(RTTs)
 
 	// make the length fit with the number of node
@@ -188,7 +193,7 @@ func (c Catalog) RankNodeByRTT() {
 	for i, rtt := range RTTs {
 		c.SortedP2PID[i] = RTTtoP2PID[rtt]
 	}
-
+	log.Printf("sortedp2pid map: %v\n", c.SortedP2PID)
 }
 
 type customInformers struct {

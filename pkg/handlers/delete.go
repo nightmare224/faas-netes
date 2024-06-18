@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 
 	"github.com/openfaas/faas-netes/pkg/catalog"
@@ -76,8 +77,14 @@ func MakeDeleteHandler(defaultNamespace string, clientset *kubernetes.Clientset,
 		}
 
 		if isFunction(deployment) {
-			err := deleteFunction(lookupNamespace, clientset, request, w)
+			err := deleteFunction(lookupNamespace, clientset, request)
 			if err != nil {
+				if errors.IsNotFound(err) {
+					w.WriteHeader(http.StatusNotFound)
+				} else {
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+				w.Write([]byte(err.Error()))
 				return
 			}
 		} else {
@@ -103,34 +110,21 @@ func isFunction(deployment *appsv1.Deployment) bool {
 	return false
 }
 
-func deleteFunction(functionNamespace string, clientset *kubernetes.Clientset, request types.DeleteFunctionRequest, w http.ResponseWriter) error {
+func deleteFunction(functionNamespace string, clientset *kubernetes.Clientset, request types.DeleteFunctionRequest) error {
 	foregroundPolicy := metav1.DeletePropagationForeground
 	opts := &metav1.DeleteOptions{PropagationPolicy: &foregroundPolicy}
 
 	if deployErr := clientset.AppsV1().Deployments(functionNamespace).
 		Delete(context.TODO(), request.FunctionName, *opts); deployErr != nil {
-
-		if errors.IsNotFound(deployErr) {
-			w.WriteHeader(http.StatusNotFound)
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-		w.Write([]byte(deployErr.Error()))
-		return fmt.Errorf("error deleting function's deployment")
+		log.Println("error deleting function's deployment")
+		return deployErr
 	}
 
 	if svcErr := clientset.CoreV1().
 		Services(functionNamespace).
 		Delete(context.TODO(), request.FunctionName, *opts); svcErr != nil {
-
-		if errors.IsNotFound(svcErr) {
-			w.WriteHeader(http.StatusNotFound)
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-
-		w.Write([]byte(svcErr.Error()))
-		return fmt.Errorf("error deleting function's service")
+		fmt.Println("error deleting function's service")
+		return svcErr
 	}
 	return nil
 }
