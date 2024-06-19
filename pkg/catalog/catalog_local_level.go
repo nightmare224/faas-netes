@@ -20,6 +20,10 @@ func (node *Node) addAvailableFunctions(functionStatus types.FunctionStatus) {
 	node.FunctionExecutionTime[functionStatus.Name].Store(1)
 }
 
+func (node *Node) updateAvailableFunctions(functionStatus types.FunctionStatus) {
+	node.AvailableFunctionsReplicas[functionStatus.Name] = functionStatus.AvailableReplicas
+}
+
 func (node *Node) deleteAvailableFunctions(functionName string) {
 	delete(node.AvailableFunctionsReplicas, functionName)
 	delete(node.FunctionExecutionTime, functionName)

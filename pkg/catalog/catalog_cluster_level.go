@@ -83,6 +83,17 @@ func (c Catalog) AddAvailableFunctions(functionStatus types.FunctionStatus) {
 	c.NodeCatalog[selfCatagoryKey].publishInfo()
 }
 
+func (c Catalog) UpdateAvailableFunctions(functionStatus types.FunctionStatus) {
+	// update the catalog of itself
+	c.NodeCatalog[selfCatagoryKey].updateAvailableFunctions(functionStatus)
+
+	// update the overall replicat count
+	c.updatetReplicasWithFunctionName(functionStatus.Name)
+
+	// publish info
+	c.NodeCatalog[selfCatagoryKey].publishInfo()
+}
+
 func (c Catalog) DeleteAvailableFunctions(functionName string) {
 	// update the catalog of itself
 	c.NodeCatalog[selfCatagoryKey].deleteAvailableFunctions(functionName)

@@ -36,28 +36,9 @@ type KubeClient struct {
 	Factory        k8s.FunctionFactory
 	DeployLister   v1appslisters.DeploymentLister
 	InvokeResolver proxy.BaseURLResolver
+	Informers      customInformers
 	// for convenient
 	P2PID string
-}
-
-func newKubeClientset(clientCmdConfig *rest.Config) *kubernetes.Clientset {
-	kubeconfigQPS := 100
-	kubeconfigBurst := 250
-	clientCmdConfig.QPS = float32(kubeconfigQPS)
-	clientCmdConfig.Burst = kubeconfigBurst
-	kubeClient, err := kubernetes.NewForConfig(clientCmdConfig)
-	if err != nil {
-		log.Fatalf("Error building Kubernetes clientset: %s", err.Error())
-	}
-
-	return kubeClient
-}
-func newFaasClientset(clientCmdConfig *rest.Config) *clientset.Clientset {
-	faasClient, err := clientset.NewForConfig(clientCmdConfig)
-	if err != nil {
-		log.Fatalf("Error building OpenFaaS clientset: %s", err.Error())
-	}
-	return faasClient
 }
 
 func NewKubeConfig(kubeconfigPath string) ([]*rest.Config, error) {
@@ -127,13 +108,12 @@ func NewKubeClientWithIpGenerator(config config.BootstrapConfig, clientCmdConfig
 		log.Printf("peer id: %s, target ip: %s, map: %v\n", p2pID, ip, clientCmdConfigMap)
 		kubeClientset := newKubeClientset(clientCmdConfig)
 		faasClientset := newFaasClientset(clientCmdConfig)
-
+		log.Printf("default namespace: %s\n", config.DefaultFunctionNamespace)
 		kubeInformerOpt := kubeinformers.WithNamespace(config.DefaultFunctionNamespace)
 		kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClientset, defaultResync, kubeInformerOpt)
 		faasInformerOpt := faasinformers.WithNamespace(config.DefaultFunctionNamespace)
 		faasInformerFactory := faasinformers.NewSharedInformerFactoryWithOptions(faasClientset, defaultResync, faasInformerOpt)
 		informers := startInformers(kubeInformerFactory, faasInformerFactory, stopCh, operator)
-		// handlers.RegisterEventHandlers(informers.DeploymentInformer, setup.kubeClient, config.DefaultFunctionNamespace)
 
 		// create deploy lister
 		deployLister := informers.DeploymentInformer.Lister()
@@ -150,11 +130,32 @@ func NewKubeClientWithIpGenerator(config config.BootstrapConfig, clientCmdConfig
 			Clientset:      kubeClientset,
 			Factory:        k8s.NewFunctionFactory(kubeClientset, deployConfig, faasClientset.OpenfaasV1()),
 			DeployLister:   deployLister,
+			Informers:      informers,
 			InvokeResolver: invokeResolver,
 			// fill in later
 			P2PID: p2pID,
 		}
 	}
+}
+
+func newKubeClientset(clientCmdConfig *rest.Config) *kubernetes.Clientset {
+	kubeconfigQPS := 100
+	kubeconfigBurst := 250
+	clientCmdConfig.QPS = float32(kubeconfigQPS)
+	clientCmdConfig.Burst = kubeconfigBurst
+	kubeClient, err := kubernetes.NewForConfig(clientCmdConfig)
+	if err != nil {
+		log.Fatalf("Error building Kubernetes clientset: %s", err.Error())
+	}
+
+	return kubeClient
+}
+func newFaasClientset(clientCmdConfig *rest.Config) *clientset.Clientset {
+	faasClient, err := clientset.NewForConfig(clientCmdConfig)
+	if err != nil {
+		log.Fatalf("Error building OpenFaaS clientset: %s", err.Error())
+	}
+	return faasClient
 }
 
 // sort the P2P ID from the fastest to slowest

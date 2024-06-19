@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/openfaas/faas-netes/pkg/catalog"
 	"github.com/openfaas/faas-netes/pkg/k8s"
@@ -74,14 +73,14 @@ func MakeDeployHandler(functionNamespace string, factory k8s.FunctionFactory, fu
 			return
 		}
 		// update the catalog until the function is ready
-		go func() {
-			fn, err := waitDeployReadyAndReport(kubeClient, namespace, request.Service)
-			if err != nil {
-				log.Printf("[Deploy] error deploying %s, error: %s\n", request.Service, err)
-				return
-			}
-			c.AddAvailableFunctions(fn)
-		}()
+		// go func() {
+		// fn, err := waitDeployReadyAndReport(kubeClient, namespace, request.Service)
+		// 	if err != nil {
+		// 		log.Printf("[Deploy] error deploying %s, error: %s\n", request.Service, err)
+		// 		return
+		// 	}
+		// 	c.AddAvailableFunctions(fn)
+		// }()
 
 		w.WriteHeader(httpStatusCode)
 	}
@@ -436,49 +435,4 @@ func getMinReplicaCount(labels map[string]string) *int32 {
 	}
 
 	return nil
-}
-
-func waitDeployReadyAndReport(kubeClient *kubernetes.Clientset, functionNamespace string, functionName string) (types.FunctionStatus, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
-	defer cancel()
-	watch, err := kubeClient.AppsV1().Deployments(functionNamespace).Watch(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("faas_function=%s", functionName)})
-	if err != nil {
-		fmt.Printf("Unable to watch function: %v", err.Error())
-		return types.FunctionStatus{}, err
-	}
-	for {
-		select {
-		case event, ok := <-watch.ResultChan():
-			if !ok {
-				err := fmt.Errorf("deployment watch channel for function %s closed", functionName)
-				return types.FunctionStatus{}, err
-			}
-			dep, ok := event.Object.(*appsv1.Deployment)
-			if !ok {
-				continue
-			}
-			if dep.Status.ReadyReplicas >= 1 {
-				fmt.Println("Deployment is ready")
-				watch.Stop()
-				return *k8s.AsFunctionStatus(*dep), nil
-			}
-		case <-ctx.Done():
-			err := fmt.Errorf("deployment watch channel for function %s closed", functionName)
-			watch.Stop()
-			return types.FunctionStatus{}, err
-		}
-	}
-
-	// for event := range watch.ResultChan() {
-	// 	dep, ok := event.Object.(*appsv1.Deployment)
-	// 	if !ok {
-	// 		continue
-	// 	}
-	// 	if dep.Status.ReadyReplicas >= 1 {
-	// 		fmt.Println("Deployment is ready")
-	// 		watch.Stop()
-	// 		return *k8s.AsFunctionStatus(*dep), nil
-	// 	}
-	// }
-	// return
 }

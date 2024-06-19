@@ -69,7 +69,6 @@ func (ir *InfoRoom) publishLoop(c Catalog) {
 	for {
 		info := <-ir.infoChan
 		infoMsg := packNodeInfoMsg(c, info)
-		// log.Println("Ready to publish:", info)
 		infoBytes, err := json.Marshal(infoMsg)
 		if err != nil {
 			log.Printf("serialized info message error: %s\n", err)

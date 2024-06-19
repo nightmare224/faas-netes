@@ -129,7 +129,7 @@ func MakeReplicaUpdater(defaultNamespace string, c catalog.Catalog) http.Handler
 // TODO: first use the naive solution, sequentially scale up
 func scaleUp(functionName string, functionNamespace string, desiredReplicas int32, deployment *v1.Deployment, c catalog.Catalog) error {
 	scaleUpCnt := desiredReplicas - int32(c.FunctionCatalog[functionName].Replicas)
-	log.Printf("scale up count: %d\n", scaleUpCnt)
+	// log.Printf("scale up count: %d\n", scaleUpCnt)
 	fn := c.FunctionCatalog[functionName]
 	faasDeployment := types.FunctionDeployment{
 		Service:                fn.Name,
@@ -145,7 +145,7 @@ func scaleUp(functionName string, functionNamespace string, desiredReplicas int3
 		Requests:               fn.Requests,
 		ReadOnlyRootFilesystem: fn.ReadOnlyRootFilesystem,
 	}
-	log.Printf("sorted p2 pid: %v\n", c.SortedP2PID)
+	// log.Printf("sorted p2 pid: %v\n", c.SortedP2PID)
 
 	// try scale up the function from near to far
 	for i := 0; i < len(*c.SortedP2PID) && scaleUpCnt > 0; i++ {
@@ -156,6 +156,7 @@ func scaleUp(functionName string, functionNamespace string, desiredReplicas int3
 		log.Printf("p2pID: %s, available replicas: %d\n", p2pID, availableFunctionsReplicas)
 		if availableFunctionsReplicas == 0 {
 			functionList := k8s.NewFunctionList(functionNamespace, c.NodeCatalog[p2pID].DeployLister)
+			// TODO: deploy directly on others k8s, need somewhat publish this infomation
 			err, _ := makeFunction(functionNamespace, c.NodeCatalog[p2pID].Factory, functionList, faasDeployment)
 			if err != nil {
 				log.Printf("make new function error: %v\n", err)
@@ -218,7 +219,7 @@ func scaleDown(functionName string, functionNamespace string, desiredReplicas in
 				if err != nil {
 					return err
 				}
-				c.DeleteAvailableFunctions(functionName)
+				// c.DeleteAvailableFunctions(functionName)
 				scaleDownCnt -= availableFunctionsReplicas
 			}
 		}

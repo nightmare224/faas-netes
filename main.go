@@ -184,6 +184,13 @@ func initSelfCatagory(c catalog.Catalog, functionNamespace string) *catalog.Node
 		panic(err)
 	}
 
+	// register the event handler so when there is the change it publish to p2p network
+	node := c.NodeCatalog[catalog.GetSelfCatalogKey()]
+	deployInformer := node.Informers.DeploymentInformer
+	clientset := node.Clientset
+	// catalog.RegisterEventHandlers(c, deployInformer, clientset, functionNamespace)
+	c.RegisterEventHandlers(deployInformer, clientset, functionNamespace)
+
 	for i, fn := range fns {
 		// TODO: should be more sphofisticate
 		c.FunctionCatalog[fn.Name] = &fns[i]
