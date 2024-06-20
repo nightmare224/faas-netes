@@ -16,7 +16,6 @@ import (
 	"github.com/openfaas/faas-netes/pkg/catalog"
 	"github.com/openfaas/faas-netes/pkg/k8s"
 	"github.com/openfaas/faas-provider/types"
-	v1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -63,25 +62,25 @@ func MakeReplicaUpdater(defaultNamespace string, c catalog.Catalog) http.Handler
 			return
 		}
 
-		options := metav1.GetOptions{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       "Deployment",
-				APIVersion: "apps/v1",
-			},
-		}
+		// options := metav1.GetOptions{
+		// 	TypeMeta: metav1.TypeMeta{
+		// 		Kind:       "Deployment",
+		// 		APIVersion: "apps/v1",
+		// 	},
+		// }
 
-		deployment, err := c.NodeCatalog[catalog.GetSelfCatalogKey()].Clientset.AppsV1().Deployments(lookupNamespace).Get(context.TODO(), functionName, options)
+		// deployment, err := c.NodeCatalog[catalog.GetSelfCatalogKey()].Clientset.AppsV1().Deployments(lookupNamespace).Get(context.TODO(), functionName, options)
 
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Unable to lookup function deployment " + functionName))
-			log.Println(err)
-			return
-		}
+		// if err != nil {
+		// 	w.WriteHeader(http.StatusInternalServerError)
+		// 	w.Write([]byte("Unable to lookup function deployment " + functionName))
+		// 	log.Println(err)
+		// 	return
+		// }
 
-		fn, fnExist := c.FunctionCatalog[deployment.Name]
+		fn, fnExist := c.FunctionCatalog[functionName]
 		if !fnExist {
-			msg := fmt.Sprintf("service %s not found", deployment.Name)
+			msg := fmt.Sprintf("service %s not found", functionName)
 			log.Printf("[Scale] %s\n", msg)
 			http.Error(w, msg, http.StatusNotFound)
 			return
@@ -101,20 +100,20 @@ func MakeReplicaUpdater(defaultNamespace string, c catalog.Catalog) http.Handler
 		// no change or second hand scale up request.
 		// Currently the faasd can not scale up the number of container, so if it receive the scale up from other, just stay
 		if oldReplicas == replicas || isOffloadRequest(r) {
-			log.Printf("Scale %s: stay replica %d\n", deployment.Name, replicas)
+			log.Printf("Scale %s: stay replica %d\n", functionName, replicas)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		} else if oldReplicas < replicas { //scale up
-			log.Printf("Scale up %s: replica %d->%d\n", deployment.Name, oldReplicas, replicas)
-			err := scaleUp(deployment.Name, lookupNamespace, replicas, deployment, c)
+			log.Printf("Scale up %s: replica %d->%d\n", functionName, oldReplicas, replicas)
+			err := scaleUp(functionName, lookupNamespace, replicas, c)
 			if err != nil {
 				log.Printf("[Scale] %s\n", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 		} else { // scale down
-			log.Printf("Scale down %s: replica %d->%d\n", deployment.Name, *deployment.Spec.Replicas, replicas)
-			err := scaleDown(deployment.Name, lookupNamespace, replicas, deployment, c)
+			log.Printf("Scale down %s: replica %d->%d\n", functionName, oldReplicas, replicas)
+			err := scaleDown(functionName, lookupNamespace, replicas, c)
 			if err != nil {
 				log.Printf("[Scale] %s\n", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -127,7 +126,7 @@ func MakeReplicaUpdater(defaultNamespace string, c catalog.Catalog) http.Handler
 }
 
 // TODO: first use the naive solution, sequentially scale up
-func scaleUp(functionName string, functionNamespace string, desiredReplicas int32, deployment *v1.Deployment, c catalog.Catalog) error {
+func scaleUp(functionName string, functionNamespace string, desiredReplicas int32, c catalog.Catalog) error {
 	scaleUpCnt := desiredReplicas - int32(c.FunctionCatalog[functionName].Replicas)
 	// log.Printf("scale up count: %d\n", scaleUpCnt)
 	fn := c.FunctionCatalog[functionName]
@@ -180,6 +179,18 @@ func scaleUp(functionName string, functionNamespace string, desiredReplicas int3
 			}
 			newReplicas := scaleUpCap + availableFunctionsReplicas
 			log.Printf("Scale up to newReplicas: %d", newReplicas)
+			options := metav1.GetOptions{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "Deployment",
+					APIVersion: "apps/v1",
+				},
+			}
+			// different client have differnt deployment uuid
+			deployment, err := c.NodeCatalog[p2pID].Clientset.AppsV1().Deployments(functionNamespace).Get(context.TODO(), functionName, options)
+			if err != nil {
+				log.Println(err)
+				return err
+			}
 			deployment.Spec.Replicas = &newReplicas
 			if _, err = clientset.AppsV1().Deployments(functionNamespace).Update(context.TODO(), deployment, metav1.UpdateOptions{}); err != nil {
 				log.Printf("unable to update function deployment: %s, %s", functionName, err)
@@ -192,18 +203,31 @@ func scaleUp(functionName string, functionNamespace string, desiredReplicas int3
 	return nil
 }
 
-func scaleDown(functionName string, functionNamespace string, desiredReplicas int32, deployment *v1.Deployment, c catalog.Catalog) error {
+func scaleDown(functionName string, functionNamespace string, desiredReplicas int32, c catalog.Catalog) error {
 	scaleDownCnt := int32(c.FunctionCatalog[functionName].Replicas) - desiredReplicas
 
 	// remove the function from the far instance
-	for i := len(*c.SortedP2PID) - 1; i >= 0 && scaleDownCnt > 0; i++ {
+	for i := len(*c.SortedP2PID) - 1; i >= 0 && scaleDownCnt > 0; i-- {
 		p2pID := (*c.SortedP2PID)[i]
 		availableFunctionsReplicas := int32(c.NodeCatalog[p2pID].AvailableFunctionsReplicas[functionName])
+		log.Printf("p2pID: %s, available replicas: %d\n", p2pID, availableFunctionsReplicas)
 		if availableFunctionsReplicas > 0 {
 			// the replica is more than the scale down count
 			clientset := c.NodeCatalog[p2pID].Clientset
 			if availableFunctionsReplicas > scaleDownCnt {
 				replicas := availableFunctionsReplicas - scaleDownCnt
+				options := metav1.GetOptions{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Deployment",
+						APIVersion: "apps/v1",
+					},
+				}
+				// different client have differnt deployment uuid
+				deployment, err := c.NodeCatalog[p2pID].Clientset.AppsV1().Deployments(functionNamespace).Get(context.TODO(), functionName, options)
+				if err != nil {
+					log.Println(err)
+					return err
+				}
 				deployment.Spec.Replicas = &replicas
 				if _, err := clientset.AppsV1().Deployments(functionNamespace).Update(context.TODO(), deployment, metav1.UpdateOptions{}); err != nil {
 					log.Printf("unable to update function deployment: %s, %s", functionName, err)
@@ -215,7 +239,7 @@ func scaleDown(functionName string, functionNamespace string, desiredReplicas in
 					FunctionName: functionName,
 					Namespace:    functionNamespace,
 				}
-				err := deleteFunction(functionName, clientset, request)
+				err := deleteFunction(functionNamespace, clientset, request)
 				if err != nil {
 					return err
 				}

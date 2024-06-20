@@ -45,6 +45,7 @@ func (c Catalog) RegisterEventHandlers(deploymentInformer v1apps.DeploymentInfor
 			newFn := k8s.AsFunctionStatus(*newDeploy)
 			// only for update available replica
 			replicas, exist := node.AvailableFunctionsReplicas[newFn.Name]
+			// should be fix
 			if exist && replicas != newFn.AvailableReplicas && newFn.AvailableReplicas > 0 {
 				c.UpdateAvailableFunctions(*newFn)
 			}
