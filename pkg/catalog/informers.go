@@ -28,7 +28,7 @@ func (c Catalog) RegisterEventHandlers(deploymentInformer v1apps.DeploymentInfor
 			// only trigger add if it is not yet in record
 			if _, exist := node.AvailableFunctionsReplicas[fname]; !exist {
 				go func() {
-					fn, err := waitDeployReadyAndReport(kubeClient, namespace, fname)
+					fn, err := WaitDeployReadyAndReport(kubeClient, namespace, fname)
 					if err != nil {
 						log.Printf("[Deploy] error deploying %s, error: %s\n", fname, err)
 						return
@@ -62,7 +62,7 @@ func (c Catalog) RegisterEventHandlers(deploymentInformer v1apps.DeploymentInfor
 	})
 }
 
-func waitDeployReadyAndReport(kubeClient *kubernetes.Clientset, functionNamespace string, functionName string) (types.FunctionStatus, error) {
+func WaitDeployReadyAndReport(kubeClient *kubernetes.Clientset, functionNamespace string, functionName string) (types.FunctionStatus, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 	watch, err := kubeClient.AppsV1().Deployments(functionNamespace).Watch(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("faas_function=%s", functionName)})

@@ -103,12 +103,11 @@ func NewKubeClientWithIpGenerator(config config.BootstrapConfig, clientCmdConfig
 		clientCmdConfig, exist := clientCmdConfigMap[ip]
 		if !exist {
 			log.Printf("Cannot find the kubeclient config of ip %s\n", ip)
-			return KubeClient{P2PID: p2pID}
+			// the one cannot find always the remote one
+			return KubeClient{P2PID: p2pID, InvokeResolver: k8s.NewFunctionLookupRemote(ip)}
 		}
-		log.Printf("peer id: %s, target ip: %s, map: %v\n", p2pID, ip, clientCmdConfigMap)
 		kubeClientset := newKubeClientset(clientCmdConfig)
 		faasClientset := newFaasClientset(clientCmdConfig)
-		log.Printf("default namespace: %s\n", config.DefaultFunctionNamespace)
 		kubeInformerOpt := kubeinformers.WithNamespace(config.DefaultFunctionNamespace)
 		kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClientset, defaultResync, kubeInformerOpt)
 		faasInformerOpt := faasinformers.WithNamespace(config.DefaultFunctionNamespace)
@@ -173,6 +172,7 @@ func (c Catalog) RankNodeByRTT() {
 			url, _ := p2pNode.InvokeResolver.Resolve("")
 			ip, _, _ := net.SplitHostPort(url.Host)
 			// just try connect with the k8s api
+			// TODO: should try to connect with different port
 			conn, err := net.DialTimeout("tcp", ip+":6443", 5*time.Second)
 			if err != nil {
 				fmt.Printf("Measure RTT TCP connection error: %s", err.Error())

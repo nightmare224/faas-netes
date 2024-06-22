@@ -7,7 +7,7 @@ import (
 )
 
 // own itself use this key, other will use the p2p id as key
-var selfCatagoryKey string = "0"
+const selfCatagoryKey string = "0"
 
 type InfoLevel int
 
@@ -17,6 +17,8 @@ const (
 )
 
 const infoUpdateIntervalSec = 10
+
+var EnabledOffload bool = false
 
 const (
 	// CPU average overload threshold within one minitues

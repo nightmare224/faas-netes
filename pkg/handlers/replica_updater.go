@@ -22,8 +22,6 @@ import (
 // MakeReplicaUpdater updates desired count of replicas
 func MakeReplicaUpdater(defaultNamespace string, c catalog.Catalog) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		log.Println("Update replicas")
-
 		vars := mux.Vars(r)
 
 		functionName := vars["name"]
@@ -99,10 +97,32 @@ func MakeReplicaUpdater(defaultNamespace string, c catalog.Catalog) http.Handler
 		// TODO: use anitaffinity to make no two pod on same node
 		// no change or second hand scale up request.
 		// Currently the faasd can not scale up the number of container, so if it receive the scale up from other, just stay
-		if oldReplicas == replicas || isOffloadRequest(r) {
+		// the isOffloadRequest is for the faasd
+		if oldReplicas == replicas {
 			log.Printf("Scale %s: stay replica %d\n", functionName, replicas)
 			w.WriteHeader(http.StatusNoContent)
 			return
+		} else if !catalog.EnabledOffload || isOffloadRequest(r) {
+			// no other way to go, just scale up all here, it should be the cloud side if it does not enabled offload
+			options := metav1.GetOptions{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "Deployment",
+					APIVersion: "apps/v1",
+				},
+			}
+			deployment, err := c.NodeCatalog[catalog.GetSelfCatalogKey()].Clientset.AppsV1().Deployments(lookupNamespace).Get(context.TODO(), functionName, options)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("Unable to lookup function deployment " + functionName))
+				log.Println(err)
+				return
+			}
+			deployment.Spec.Replicas = &replicas
+			if _, err = c.NodeCatalog[catalog.GetSelfCatalogKey()].Clientset.AppsV1().Deployments(lookupNamespace).Update(context.TODO(), deployment, metav1.UpdateOptions{}); err != nil {
+				w.Write([]byte("Unable to scale deployment " + functionName))
+				log.Println(err)
+				return
+			}
 		} else if oldReplicas < replicas { //scale up
 			log.Printf("Scale up %s: replica %d->%d\n", functionName, oldReplicas, replicas)
 			err := scaleUp(functionName, lookupNamespace, replicas, c)
@@ -163,6 +183,7 @@ func scaleUp(functionName string, functionNamespace string, desiredReplicas int3
 			}
 			// deploy success mean scale up one instance
 			scaleUpCnt--
+			availableFunctionsReplicas += 1
 		}
 		if scaleUpCnt > 0 {
 			clientset := c.NodeCatalog[p2pID].Clientset
@@ -203,11 +224,12 @@ func scaleUp(functionName string, functionNamespace string, desiredReplicas int3
 	return nil
 }
 
+// TODO: If all the prometheus trigger the scale down at the same time, will it mistakely delete?
 func scaleDown(functionName string, functionNamespace string, desiredReplicas int32, c catalog.Catalog) error {
 	scaleDownCnt := int32(c.FunctionCatalog[functionName].Replicas) - desiredReplicas
 
-	// remove the function from the far instance
-	for i := len(*c.SortedP2PID) - 1; i >= 0 && scaleDownCnt > 0; i-- {
+	// try scale up the function from near to far (take care of itself first)
+	for i := 0; i < len(*c.SortedP2PID) && scaleDownCnt > 0; i++ {
 		p2pID := (*c.SortedP2PID)[i]
 		availableFunctionsReplicas := int32(c.NodeCatalog[p2pID].AvailableFunctionsReplicas[functionName])
 		log.Printf("p2pID: %s, available replicas: %d\n", p2pID, availableFunctionsReplicas)

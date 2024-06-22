@@ -49,6 +49,7 @@ func main() {
 		verbose bool
 	)
 	var kubeconfigPath string
+	var offload bool
 
 	flag.StringVar(&kubeconfig, "kubeconfig", "",
 		"Path to a kubeconfig. Only required if out-of-cluster.")
@@ -58,10 +59,13 @@ func main() {
 	flag.Bool("operator", false, "Run as an operator (not available in CE)")
 	flag.StringVar(&kubeconfigPath, "kubeconfigpath", "",
 		"Path to a kubeconfig directory. Only required if multiple OpenFaaS clusters exist.")
+	flag.BoolVar(&offload, "offload", false,
+		"Enable offload to other cluster. Only work if multiple OpenFaaS clusters exist.")
 
 	flag.Parse()
 
 	mode := "controller"
+	catalog.EnabledOffload = offload
 
 	sha, release := version.GetReleaseInfo()
 	fmt.Printf("faas-netes - Community Edition (CE)\n"+

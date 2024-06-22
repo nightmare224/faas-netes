@@ -10,13 +10,6 @@ import (
 	"github.com/openfaas/faas-netes/pkg/catalog"
 )
 
-const (
-	// CPU average overload threshold within one minitues
-	CPUOverloadThreshold = 0.80
-	// Memory average overload threshold within one minitues
-	MemOverloadThreshold = 0.80
-)
-
 type CustomHealth struct {
 	Overload bool `json:"overload"`
 }

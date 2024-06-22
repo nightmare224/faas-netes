@@ -25,50 +25,65 @@ import (
 // and trigger on local cluster
 func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c catalog.Catalog) http.HandlerFunc {
 
-	enableOffload := true
 	return func(w http.ResponseWriter, r *http.Request) {
+
 		// means in multi cluster scenario
-		if enableOffload && !isOffloadRequest(r) {
-			vars := mux.Vars(r)
-			functionName := vars["name"]
-			if strings.Contains(vars["name"], ".") {
-				functionName = strings.TrimSuffix(vars["name"], "."+functionNamespace)
-			}
-			targetFunction, targetP2PID, err := findSuitableNode(functionName, c)
+		// if !isOffloadRequest(r) {
+		vars := mux.Vars(r)
+		functionName := vars["name"]
+		if strings.Contains(vars["name"], ".") {
+			functionName = strings.TrimSuffix(vars["name"], "."+functionNamespace)
+		}
+		targetFunction, exist := c.FunctionCatalog[functionName]
+		if !exist {
+			err := fmt.Errorf("no endpoints available for: %s", functionName)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		targetP2PID := catalog.GetSelfCatalogKey()
+		var err error
+		if !isOffloadRequest(r) && catalog.EnabledOffload {
+			targetP2PID, err = findSuitableNode(functionName, c)
 			if err != nil {
 				fmt.Printf("Unable to trigger function: %v\n", err.Error())
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			fmt.Println("trigger target:", targetP2PID)
-			// no deploy required, just trigger
-			if targetFunction != nil {
-				deployment := types.FunctionDeployment{
-					Service:                targetFunction.Name,
-					Image:                  targetFunction.Image,
-					Namespace:              targetFunction.Namespace,
-					EnvProcess:             targetFunction.EnvProcess,
-					EnvVars:                targetFunction.EnvVars,
-					Constraints:            targetFunction.Constraints,
-					Secrets:                targetFunction.Secrets,
-					Labels:                 targetFunction.Labels,
-					Annotations:            targetFunction.Annotations,
-					Limits:                 targetFunction.Limits,
-					Requests:               targetFunction.Requests,
-					ReadOnlyRootFilesystem: targetFunction.ReadOnlyRootFilesystem,
-				}
-				functionList := k8s.NewFunctionList(functionNamespace, c.NodeCatalog[targetP2PID].DeployLister)
-				makeFunction(functionNamespace, c.NodeCatalog[targetP2PID].Factory, functionList, deployment)
-				// TODO: wait unitl the function ready
-			}
-			// trigger the function here
-			// if non local than change the resolver
-			markAsOffloadRequest(r)
-			offloadRequest(w, r, config, c.NodeCatalog[targetP2PID].InvokeResolver, c.NodeCatalog[targetP2PID].FunctionExecutionTime)
-		} else {
-			// the index 0 is assume to be the local one
-			proxy.NewHandlerFunc(config, c.NodeCatalog[catalog.GetSelfCatalogKey()].InvokeResolver, true)(w, r)
 		}
+		// if the target node has no function, trigger the deploy first
+		if _, exist := c.NodeCatalog[targetP2PID].AvailableFunctionsReplicas[functionName]; !exist {
+			deployment := types.FunctionDeployment{
+				Service:                targetFunction.Name,
+				Image:                  targetFunction.Image,
+				Namespace:              targetFunction.Namespace,
+				EnvProcess:             targetFunction.EnvProcess,
+				EnvVars:                targetFunction.EnvVars,
+				Constraints:            targetFunction.Constraints,
+				Secrets:                targetFunction.Secrets,
+				Labels:                 targetFunction.Labels,
+				Annotations:            targetFunction.Annotations,
+				Limits:                 targetFunction.Limits,
+				Requests:               targetFunction.Requests,
+				ReadOnlyRootFilesystem: targetFunction.ReadOnlyRootFilesystem,
+			}
+			functionList := k8s.NewFunctionList(functionNamespace, c.NodeCatalog[targetP2PID].DeployLister)
+			makeFunction(functionNamespace, c.NodeCatalog[targetP2PID].Factory, functionList, deployment)
+			// wait until the function is ready
+			_, err := catalog.WaitDeployReadyAndReport(c.NodeCatalog[targetP2PID].Clientset, functionNamespace, functionName)
+			if err != nil {
+				log.Printf("[Deploy] error deploying %s, error: %s\n", functionName, err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		// trigger the function here
+		// if non local than change the resolver
+		markAsOffloadRequest(r)
+		offloadRequest(w, r, config, c.NodeCatalog[targetP2PID].InvokeResolver, c.NodeCatalog[targetP2PID].FunctionExecutionTime)
+		// } else {
+		// 	// the index 0 is assume to be the local one
+		// 	proxy.NewHandlerFunc(config, c.NodeCatalog[catalog.GetSelfCatalogKey()].InvokeResolver, true)(w, r)
+		// }
 
 	}
 }
@@ -132,24 +147,19 @@ func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalo
 
 // find the information of functionstatus, and found the one can be deployed/triggered this function
 // if the first parameter is nil, mean do not require deploy before trigger
-func findSuitableNode(functionName string, c catalog.Catalog) (*types.FunctionStatus, string, error) {
+func findSuitableNode(functionName string, c catalog.Catalog) (string, error) {
 
-	targetFunction, exist := c.FunctionCatalog[functionName]
-	if !exist {
-		err := fmt.Errorf("no endpoints available for: %s", functionName)
-		return nil, "", err
-	}
 	p2pID, err := weightExecTimeScheduler(functionName, c.NodeCatalog)
 	// if can not found the suitable node to execute function, report the first non-overload node
 	if err != nil {
 		for p2pID, node := range c.NodeCatalog {
 			if !node.Overload {
-				return targetFunction, p2pID, nil
+				return p2pID, nil
 			}
 		}
 	}
+	return p2pID, nil
 
-	return nil, p2pID, nil
 }
 
 // maybe in other place when the platform is overload the request can be redirect
