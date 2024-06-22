@@ -102,7 +102,7 @@ func MakeReplicaUpdater(defaultNamespace string, c catalog.Catalog) http.Handler
 			log.Printf("Scale %s: stay replica %d\n", functionName, replicas)
 			w.WriteHeader(http.StatusNoContent)
 			return
-		} else if !catalog.EnabledOffload || isOffloadRequest(r) {
+		} else if /* !catalog.EnabledOffload  ||*/ isOffloadRequest(r) {
 			// no other way to go, just scale up all here, it should be the cloud side if it does not enabled offload
 			options := metav1.GetOptions{
 				TypeMeta: metav1.TypeMeta{
@@ -164,10 +164,13 @@ func scaleUp(functionName string, functionNamespace string, desiredReplicas int3
 		Requests:               fn.Requests,
 		ReadOnlyRootFilesystem: fn.ReadOnlyRootFilesystem,
 	}
-	// log.Printf("sorted p2 pid: %v\n", c.SortedP2PID)
-
+	// if the offload is not enable, means that the localhost is the only choose, so the length is 1
+	numNode := 1
+	if catalog.EnabledOffload {
+		numNode = len(*c.SortedP2PID)
+	}
 	// try scale up the function from near to far
-	for i := 0; i < len(*c.SortedP2PID) && scaleUpCnt > 0; i++ {
+	for i := 0; i < numNode && scaleUpCnt > 0; i++ {
 		p2pID := (*c.SortedP2PID)[i]
 		// first try to scale up at local cluster
 		// deploy first if the function is not exist
@@ -228,8 +231,13 @@ func scaleUp(functionName string, functionNamespace string, desiredReplicas int3
 func scaleDown(functionName string, functionNamespace string, desiredReplicas int32, c catalog.Catalog) error {
 	scaleDownCnt := int32(c.FunctionCatalog[functionName].Replicas) - desiredReplicas
 
+	// if the offload is not enable, means that the localhost is the only choose, so the length is 1
+	numNode := 1
+	if catalog.EnabledOffload {
+		numNode = len(*c.SortedP2PID)
+	}
 	// try scale up the function from near to far (take care of itself first)
-	for i := 0; i < len(*c.SortedP2PID) && scaleDownCnt > 0; i++ {
+	for i := 0; i < numNode && scaleDownCnt > 0; i++ {
 		p2pID := (*c.SortedP2PID)[i]
 		availableFunctionsReplicas := int32(c.NodeCatalog[p2pID].AvailableFunctionsReplicas[functionName])
 		log.Printf("p2pID: %s, available replicas: %d\n", p2pID, availableFunctionsReplicas)
