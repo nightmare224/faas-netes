@@ -173,7 +173,7 @@ func (c Catalog) RankNodeByRTT() {
 			ip, _, _ := net.SplitHostPort(url.Host)
 			// just try connect with the k8s api
 			// TODO: should try to connect with different port
-			conn, err := net.DialTimeout("tcp", ip+":6443", 5*time.Second)
+			conn, err := net.DialTimeout("tcp", ip+":22", 5*time.Second)
 			if err != nil {
 				fmt.Printf("Measure RTT TCP connection error: %s", err.Error())
 				panic(err)
