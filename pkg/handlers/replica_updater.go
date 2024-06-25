@@ -148,22 +148,7 @@ func MakeReplicaUpdater(defaultNamespace string, c catalog.Catalog) http.Handler
 // TODO: first use the naive solution, sequentially scale up
 func scaleUp(functionName string, functionNamespace string, desiredReplicas int32, c catalog.Catalog) error {
 	scaleUpCnt := desiredReplicas - int32(c.FunctionCatalog[functionName].Replicas)
-	// log.Printf("scale up count: %d\n", scaleUpCnt)
-	fn := c.FunctionCatalog[functionName]
-	faasDeployment := types.FunctionDeployment{
-		Service:                fn.Name,
-		Image:                  fn.Image,
-		Namespace:              fn.Namespace,
-		EnvProcess:             fn.EnvProcess,
-		EnvVars:                fn.EnvVars,
-		Constraints:            fn.Constraints,
-		Secrets:                fn.Secrets,
-		Labels:                 fn.Labels,
-		Annotations:            fn.Annotations,
-		Limits:                 fn.Limits,
-		Requests:               fn.Requests,
-		ReadOnlyRootFilesystem: fn.ReadOnlyRootFilesystem,
-	}
+
 	// if the offload is not enable, means that the localhost is the only choose, so the length is 1
 	numNode := 1
 	if catalog.EnabledOffload {
@@ -177,9 +162,7 @@ func scaleUp(functionName string, functionNamespace string, desiredReplicas int3
 		availableFunctionsReplicas := int32(c.NodeCatalog[p2pID].AvailableFunctionsReplicas[functionName])
 		log.Printf("p2pID: %s, available replicas: %d\n", p2pID, availableFunctionsReplicas)
 		if availableFunctionsReplicas == 0 {
-			functionList := k8s.NewFunctionList(functionNamespace, c.NodeCatalog[p2pID].DeployLister)
-			// TODO: deploy directly on others k8s, need somewhat publish this infomation
-			err, _ := makeFunction(functionNamespace, c.NodeCatalog[p2pID].Factory, functionList, faasDeployment)
+			err := deployFunctionByP2PID(functionNamespace, functionName, p2pID, c)
 			if err != nil {
 				log.Printf("make new function error: %v\n", err)
 				return err
@@ -279,5 +262,33 @@ func scaleDown(functionName string, functionNamespace string, desiredReplicas in
 		}
 	}
 
+	return nil
+}
+
+func deployFunctionByP2PID(functionNamespace string, functionName string, targetP2PID string, c catalog.Catalog) error {
+	targetFunction, exist := c.FunctionCatalog[functionName]
+	if !exist {
+		err := fmt.Errorf("no endpoints available for: %s", functionName)
+		return err
+	}
+	deployment := types.FunctionDeployment{
+		Service:                targetFunction.Name,
+		Image:                  targetFunction.Image,
+		Namespace:              targetFunction.Namespace,
+		EnvProcess:             targetFunction.EnvProcess,
+		EnvVars:                targetFunction.EnvVars,
+		Constraints:            targetFunction.Constraints,
+		Secrets:                targetFunction.Secrets,
+		Labels:                 targetFunction.Labels,
+		Annotations:            targetFunction.Annotations,
+		Limits:                 targetFunction.Limits,
+		Requests:               targetFunction.Requests,
+		ReadOnlyRootFilesystem: targetFunction.ReadOnlyRootFilesystem,
+	}
+	functionList := k8s.NewFunctionList(functionNamespace, c.NodeCatalog[targetP2PID].DeployLister)
+	err, _ := makeFunction(functionNamespace, c.NodeCatalog[targetP2PID].Factory, functionList, deployment)
+	if err != nil {
+		return err
+	}
 	return nil
 }

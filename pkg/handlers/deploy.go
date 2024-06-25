@@ -72,19 +72,11 @@ func MakeDeployHandler(functionNamespace string, factory k8s.FunctionFactory, fu
 			http.Error(w, err.Error(), httpStatusCode)
 			return
 		}
-		// update the catalog until the function is ready
-		// go func() {
-		// fn, err := waitDeployReadyAndReport(kubeClient, namespace, request.Service)
-		// 	if err != nil {
-		// 		log.Printf("[Deploy] error deploying %s, error: %s\n", request.Service, err)
-		// 		return
-		// 	}
-		// 	c.AddAvailableFunctions(fn)
-		// }()
 
 		w.WriteHeader(httpStatusCode)
 	}
 }
+
 func makeFunction(namespace string, factory k8s.FunctionFactory, functionList *k8s.FunctionList, function types.FunctionDeployment) (error, int) {
 
 	secrets := k8s.NewSecretsClient(factory.Client)

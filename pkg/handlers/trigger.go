@@ -14,7 +14,6 @@ import (
 	"github.com/gorilla/mux"
 	weightedrand "github.com/mroth/weightedrand/v2"
 	"github.com/openfaas/faas-netes/pkg/catalog"
-	"github.com/openfaas/faas-netes/pkg/k8s"
 	fhttputil "github.com/openfaas/faas-provider/httputil"
 	"github.com/openfaas/faas-provider/proxy"
 	types "github.com/openfaas/faas-provider/types"
@@ -34,7 +33,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c cat
 		if strings.Contains(vars["name"], ".") {
 			functionName = strings.TrimSuffix(vars["name"], "."+functionNamespace)
 		}
-		targetFunction, exist := c.FunctionCatalog[functionName]
+		_, exist := c.FunctionCatalog[functionName]
 		if !exist {
 			err := fmt.Errorf("no endpoints available for: %s", functionName)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -52,22 +51,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c cat
 		}
 		// if the target node has no function, trigger the deploy first
 		if _, exist := c.NodeCatalog[targetP2PID].AvailableFunctionsReplicas[functionName]; !exist {
-			deployment := types.FunctionDeployment{
-				Service:                targetFunction.Name,
-				Image:                  targetFunction.Image,
-				Namespace:              targetFunction.Namespace,
-				EnvProcess:             targetFunction.EnvProcess,
-				EnvVars:                targetFunction.EnvVars,
-				Constraints:            targetFunction.Constraints,
-				Secrets:                targetFunction.Secrets,
-				Labels:                 targetFunction.Labels,
-				Annotations:            targetFunction.Annotations,
-				Limits:                 targetFunction.Limits,
-				Requests:               targetFunction.Requests,
-				ReadOnlyRootFilesystem: targetFunction.ReadOnlyRootFilesystem,
-			}
-			functionList := k8s.NewFunctionList(functionNamespace, c.NodeCatalog[targetP2PID].DeployLister)
-			makeFunction(functionNamespace, c.NodeCatalog[targetP2PID].Factory, functionList, deployment)
+			deployFunctionByP2PID(functionNamespace, functionName, targetP2PID, c)
 			// wait until the function is ready
 			_, err := catalog.WaitDeployReadyAndReport(c.NodeCatalog[targetP2PID].Clientset, functionNamespace, functionName)
 			if err != nil {
@@ -80,11 +64,11 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c cat
 		// if non local than change the resolver
 		markAsOffloadRequest(r)
 		offloadRequest(w, r, config, c.NodeCatalog[targetP2PID].InvokeResolver, c.NodeCatalog[targetP2PID].FunctionExecutionTime)
-		// } else {
-		// 	// the index 0 is assume to be the local one
-		// 	proxy.NewHandlerFunc(config, c.NodeCatalog[catalog.GetSelfCatalogKey()].InvokeResolver, true)(w, r)
-		// }
 
+		// create a replica at the trigger point
+		if _, exist := c.NodeCatalog[catalog.GetSelfCatalogKey()].AvailableFunctionsReplicas[functionName]; !exist {
+			go deployFunctionByP2PID(functionNamespace, functionName, catalog.GetSelfCatalogKey(), c)
+		}
 	}
 }
 func markAsOffloadRequest(r *http.Request) {

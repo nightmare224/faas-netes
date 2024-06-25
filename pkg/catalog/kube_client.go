@@ -174,17 +174,17 @@ func (c Catalog) RankNodeByRTT() {
 			// just try connect with the k8s api
 			// TODO: should try to connect with different port
 			conn, err := net.DialTimeout("tcp", ip+":22", 5*time.Second)
-			if err != nil {
-				fmt.Printf("Measure RTT TCP connection error: %s", err.Error())
-				panic(err)
-			}
 			rtt = time.Since(startTime)
-			conn.Close()
+			if err != nil {
+				log.Printf("Measure RTT TCP connection error: %s, just continue", err.Error())
+			} else {
+				conn.Close()
+			}
 		}
 		RTTtoP2PID[rtt] = p2pID
 		RTTs = append(RTTs, rtt)
 	}
-	// log.Printf("RTTtoP2PID: %v\n", RTTtoP2PID)
+	log.Printf("RTTtoP2PID: %v\n", RTTtoP2PID)
 	// log.Printf("Rtts: %v, cap of sortedp2pid map: %d\n", RTTs, cap(c.SortedP2PID))
 	slices.Sort(RTTs)
 
