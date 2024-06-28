@@ -19,6 +19,9 @@ import (
 	types "github.com/openfaas/faas-provider/types"
 )
 
+// The factory that affect the weighted round robin (exponential)
+const weightRRfactory = 2
+
 // Make this able to search for other cluster's function.
 // And if other cluster exist the function, them deploy it on current local one
 // and trigger on local cluster
@@ -50,7 +53,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c cat
 			}
 		}
 		// if the target node has no function, trigger the deploy first
-		if _, exist := c.NodeCatalog[targetP2PID].AvailableFunctionsReplicas[functionName]; !exist {
+		if replicas, exist := c.NodeCatalog[targetP2PID].AvailableFunctionsReplicas[functionName]; !exist || replicas == 0 {
 			deployFunctionByP2PID(functionNamespace, functionName, targetP2PID, c)
 			// wait until the function is ready
 			_, err := catalog.WaitDeployReadyAndReport(c.NodeCatalog[targetP2PID].Clientset, functionNamespace, functionName)
@@ -66,7 +69,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c cat
 		offloadRequest(w, r, config, c.NodeCatalog[targetP2PID].InvokeResolver, c.NodeCatalog[targetP2PID].FunctionExecutionTime)
 
 		// create a replica at the trigger point
-		if _, exist := c.NodeCatalog[catalog.GetSelfCatalogKey()].AvailableFunctionsReplicas[functionName]; !exist {
+		if replicas, exist := c.NodeCatalog[catalog.GetSelfCatalogKey()].AvailableFunctionsReplicas[functionName]; !exist || replicas == 0 {
 			go deployFunctionByP2PID(functionNamespace, functionName, catalog.GetSelfCatalogKey(), c)
 		}
 	}
@@ -92,14 +95,18 @@ func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalo
 		if node.Overload {
 			continue
 		}
-		if _, exist := node.AvailableFunctionsReplicas[functionName]; exist {
+		if replicas, exist := node.AvailableFunctionsReplicas[functionName]; exist && replicas > 0 {
 			// no execTime record yet, just gave one (in fact it already init as 1)
 			// execTime := time.Duration(1)
 			// if t, exist := node.FunctionExecutionTime[functionName]; exist {
 			// execTime = t
-			execTime := node.FunctionExecutionTime[functionName].Load()
+			execTimeRaw := node.FunctionExecutionTime[functionName].Load()
+			// do power in int
+			execTime := execTimeRaw
+			for i := 1; i < weightRRfactory; i++ {
+				execTime *= execTimeRaw
+			}
 			execTimeProd *= execTime
-			// }
 			p2pIDExecTimeMapping[p2pID] = execTime
 		}
 	}
@@ -120,7 +127,7 @@ func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalo
 	for p2pID, execTime := range p2pIDExecTimeMapping {
 		probability := execTimeProd / execTime
 		choices = append(choices, weightedrand.NewChoice(p2pID, probability))
-		// fmt.Printf("exec time map %s: %s (probability: %s)\n", p2pID, execTime, probability)
+		log.Printf("exec time map %s: %d (probability: %d)\n", p2pID, execTime, probability)
 	}
 	chooser, _ := weightedrand.NewChooser(
 		choices...,
@@ -224,14 +231,15 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	start := time.Now()
 	defer func() {
-		seconds := time.Since(start)
+		nanoseconds := time.Since(start)
 		// log.Printf("%s took %f seconds\n", functionName, seconds.Seconds())
 		actualFunctionName := functionName
 		if strings.Contains(functionName, ".") {
 			actualFunctionName = strings.TrimSuffix(functionName, "."+"openfaas-fn")
 		}
 		// does the update too often?
-		functionExecutionTime[actualFunctionName].Store(int64(seconds))
+		// just store milliseconds
+		functionExecutionTime[actualFunctionName].Store(int64(nanoseconds / 1000000))
 	}()
 
 	if v := originalReq.Header.Get("Accept"); v == "text/event-stream" {

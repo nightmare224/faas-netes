@@ -95,7 +95,7 @@ func MakeDeleteHandler(defaultNamespace string, clientset *kubernetes.Clientset,
 		}
 
 		// update the catalog
-		// c.DeleteAvailableFunctions(request.FunctionName)
+		c.DeleteAvailableFunctions(request.FunctionName)
 
 		w.WriteHeader(http.StatusAccepted)
 	}

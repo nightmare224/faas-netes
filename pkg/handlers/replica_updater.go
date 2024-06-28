@@ -54,7 +54,7 @@ func MakeReplicaUpdater(defaultNamespace string, c catalog.Catalog) http.Handler
 			}
 		}
 
-		if req.Replicas == 0 {
+		if req.Replicas <= 0 {
 			http.Error(w, "replicas cannot be set to 0 in OpenFaaS CE",
 				http.StatusBadRequest)
 			return

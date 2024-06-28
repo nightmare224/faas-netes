@@ -12,10 +12,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/openfaas/faas-netes/pkg/catalog"
-	"github.com/openfaas/faas-netes/pkg/k8s"
-	"github.com/openfaas/faas-provider/types"
-	"k8s.io/apimachinery/pkg/api/errors"
-	v1 "k8s.io/client-go/listers/apps/v1"
 )
 
 // MaxReplicas licensed for OpenFaaS CE is 5/5
@@ -83,7 +79,8 @@ func MakeReplicaReader(defaultNamespace string, c catalog.Catalog) http.HandlerF
 		if fn, err := c.GetAvailableFunction(fname); err == nil {
 			//TODO: the available replicas here do not show the replica in the host, but show the
 			// overall replica, because if show 0 the gateway would consider it not ready
-			fn.AvailableReplicas = max(fn.Replicas, fn.AvailableReplicas)
+			// TODO: maybe fix this in gateway
+			// fn.AvailableReplicas = max(fn.Replicas, fn.AvailableReplicas)
 			functionBytes, _ := json.Marshal(fn)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -95,25 +92,25 @@ func MakeReplicaReader(defaultNamespace string, c catalog.Catalog) http.HandlerF
 }
 
 // getService returns a function/service or nil if not found
-func getService(functionNamespace string, functionName string, lister v1.DeploymentLister) (*types.FunctionStatus, error) {
+// func getService(functionNamespace string, functionName string, lister v1.DeploymentLister) (*types.FunctionStatus, error) {
 
-	item, err := lister.Deployments(functionNamespace).
-		Get(functionName)
+// 	item, err := lister.Deployments(functionNamespace).
+// 		Get(functionName)
 
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil, nil
-		}
+// 	if err != nil {
+// 		if errors.IsNotFound(err) {
+// 			return nil, nil
+// 		}
 
-		return nil, err
-	}
+// 		return nil, err
+// 	}
 
-	if item != nil {
-		function := k8s.AsFunctionStatus(*item)
-		if function != nil {
-			return function, nil
-		}
-	}
+// 	if item != nil {
+// 		function := k8s.AsFunctionStatus(*item)
+// 		if function != nil {
+// 			return function, nil
+// 		}
+// 	}
 
-	return nil, fmt.Errorf("function: %s not found", functionName)
-}
+// 	return nil, fmt.Errorf("function: %s not found", functionName)
+// }
