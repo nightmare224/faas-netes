@@ -79,8 +79,9 @@ func MakeReplicaReader(defaultNamespace string, c catalog.Catalog) http.HandlerF
 		if fn, err := c.GetAvailableFunction(fname); err == nil {
 			//TODO: the available replicas here do not show the replica in the host, but show the
 			// overall replica, because if show 0 the gateway would consider it not ready
+			// also the first trigger from 0->1 will be extremely slow
 			// TODO: maybe fix this in gateway
-			// fn.AvailableReplicas = max(fn.Replicas, fn.AvailableReplicas)
+			fn.AvailableReplicas = max(fn.Replicas, fn.AvailableReplicas)
 			functionBytes, _ := json.Marshal(fn)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)

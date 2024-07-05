@@ -25,7 +25,7 @@ func (c Catalog) RegisterEventHandlers(deploymentInformer v1apps.DeploymentInfor
 				return
 			}
 			fname := deployment.Name
-			log.Printf("Detect create function: %s\n", fname)
+			// log.Printf("Detect create function: %s\n", fname)
 			// only trigger add if it is not yet in record, not! should add, as the
 			// zero replica will keep in record
 			// if _, exist := node.AvailableFunctionsReplicas[fname]; !exist {
@@ -58,7 +58,7 @@ func (c Catalog) RegisterEventHandlers(deploymentInformer v1apps.DeploymentInfor
 				/* maybe change it to oldDeploy.Status.Replicas >= 1 ? */
 				if (oldDeploy.Status.Replicas >= 1) && (newDeploy.Status.Replicas == 0) {
 					// find the delete event
-					log.Printf("Detect Delete function: %s\n", newDeploy.Name)
+					// log.Printf("Detect Delete function: %s\n", newDeploy.Name)
 					// c.DeleteAvailableFunctions(newDeploy.Name)
 					newFn := k8s.AsFunctionStatus(*newDeploy)
 					newFn.AvailableReplicas, newFn.Replicas = 0, 0
@@ -66,7 +66,7 @@ func (c Catalog) RegisterEventHandlers(deploymentInformer v1apps.DeploymentInfor
 					c.UpdateAvailableFunctions(*newFn)
 				} else if *newDeploy.Spec.Replicas != int32(replicas) {
 					// find the replica update event
-					log.Printf("Detect Update function: %s\n", newDeploy.Name)
+					// log.Printf("Detect Update function: %s\n", newDeploy.Name)
 					newFn := k8s.AsFunctionStatus(*newDeploy)
 					// treat it as ready directly here
 					newFn.AvailableReplicas = newFn.Replicas

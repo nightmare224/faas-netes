@@ -47,7 +47,7 @@ func (node *Node) updatePressure(client *promv1.API) bool {
 	defer cancel()
 	// start query
 	// cpu
-	cpuQuery := "1 - (rate(node_cpu_seconds_total{mode=\"idle\"}[1m]))"
+	cpuQuery := "1 - (rate(node_cpu_seconds_total{mode=\"idle\"}[30s]))"
 	CPULoad, err := queryResourceAverageLoad(client, ctx, cpuQuery)
 	if err != nil {
 		log.Fatalf("CPU usage unavailable from Prometheus: %v", err)
@@ -55,8 +55,8 @@ func (node *Node) updatePressure(client *promv1.API) bool {
 	}
 	overload_update := (CPULoad > CPUOverloadThreshold)
 	// memory
-	// memQuery := "1 - avg_over_time(node_memory_MemAvailable_bytes[1m])/node_memory_MemTotal_bytes"
-	memQuery := "1 - ((avg_over_time(node_memory_MemFree_bytes[1m]) + avg_over_time(node_memory_Cached_bytes[1m]) + avg_over_time(node_memory_Buffers_bytes[1m])) / node_memory_MemTotal_bytes)"
+	// memQuery := "1 - avg_over_time(node_memory_MemAvailable_bytes[30s])/node_memory_MemTotal_bytes"
+	memQuery := "1 - ((avg_over_time(node_memory_MemFree_bytes[30s]) + avg_over_time(node_memory_Cached_bytes[30s]) + avg_over_time(node_memory_Buffers_bytes[30s])) / node_memory_MemTotal_bytes)"
 	MemLoad, err := queryResourceAverageLoad(client, ctx, memQuery)
 	if err != nil {
 		log.Fatalf("memory usage unavailable from Prometheus: %v", err)

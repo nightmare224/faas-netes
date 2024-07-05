@@ -106,7 +106,7 @@ func main() {
 			clientCmdConfigMap[ip] = clientCmdConfig
 		}
 	}
-	log.Println("ClientCmdConfigMap:", clientCmdConfigMap)
+	// log.Println("ClientCmdConfigMap:", clientCmdConfigMap)
 
 	// set config
 	readConfig := config.ReadConfig{}

@@ -36,6 +36,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c cat
 		if strings.Contains(vars["name"], ".") {
 			functionName = strings.TrimSuffix(vars["name"], "."+functionNamespace)
 		}
+		// log.Printf("Receive trigger request: %s\n", functionName)
 		_, exist := c.FunctionCatalog[functionName]
 		if !exist {
 			err := fmt.Errorf("no endpoints available for: %s", functionName)
@@ -52,6 +53,8 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c cat
 				return
 			}
 		}
+		// log.Printf("Target offload instance: %s\n", targetP2PID)
+
 		// if the target node has no function, trigger the deploy first
 		if replicas, exist := c.NodeCatalog[targetP2PID].AvailableFunctionsReplicas[functionName]; !exist || replicas == 0 {
 			deployFunctionByP2PID(functionNamespace, functionName, targetP2PID, c)
@@ -70,6 +73,7 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c cat
 
 		// create a replica at the trigger point
 		if replicas, exist := c.NodeCatalog[catalog.GetSelfCatalogKey()].AvailableFunctionsReplicas[functionName]; !exist || replicas == 0 {
+			// log.Printf("Try to deploy on current instance\n")
 			go deployFunctionByP2PID(functionNamespace, functionName, catalog.GetSelfCatalogKey(), c)
 		}
 	}
@@ -109,6 +113,7 @@ func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalo
 			execTimeProd *= execTime
 			p2pIDExecTimeMapping[p2pID] = execTime
 		}
+		// log.Printf("p2pIDExecTimeMapping: %v\n", p2pIDExecTimeMapping)
 	}
 
 	// all the node with funtion is overload
@@ -127,7 +132,7 @@ func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalo
 	for p2pID, execTime := range p2pIDExecTimeMapping {
 		probability := execTimeProd / execTime
 		choices = append(choices, weightedrand.NewChoice(p2pID, probability))
-		log.Printf("exec time map %s: %d (probability: %d)\n", p2pID, execTime, probability)
+		// log.Printf("exec time map %s: %d (probability: %d)\n", p2pID, execTime, probability)
 	}
 	chooser, _ := weightedrand.NewChooser(
 		choices...,
