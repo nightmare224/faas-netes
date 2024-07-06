@@ -157,6 +157,10 @@ func scaleUp(functionName string, functionNamespace string, desiredReplicas int3
 	// try scale up the function from near to far
 	for i := 0; i < numNode && scaleUpCnt > 0; i++ {
 		p2pID := (*c.SortedP2PID)[i]
+		if c.NodeCatalog[p2pID].Overload {
+			log.Printf("node %s is overload, skip scale up", p2pID)
+			continue
+		}
 		// first try to scale up at local cluster
 		// deploy first if the function is not exist
 		availableFunctionsReplicas := int32(c.NodeCatalog[p2pID].AvailableFunctionsReplicas[functionName])

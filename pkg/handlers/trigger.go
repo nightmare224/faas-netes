@@ -21,6 +21,7 @@ import (
 
 // The factory that affect the weighted round robin (exponential)
 const weightRRfactory = 2
+const overloadPenaltyFactory = 2
 
 // Make this able to search for other cluster's function.
 // And if other cluster exist the function, them deploy it on current local one
@@ -48,26 +49,19 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c cat
 		if !isOffloadRequest(r) && catalog.EnabledOffload {
 			targetP2PID, err = findSuitableNode(functionName, c)
 			if err != nil {
-				fmt.Printf("Unable to trigger function: %v\n", err.Error())
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-		// log.Printf("Target offload instance: %s\n", targetP2PID)
-
-		// if the target node has no function, trigger the deploy first
-		if replicas, exist := c.NodeCatalog[targetP2PID].AvailableFunctionsReplicas[functionName]; !exist || replicas == 0 {
-			deployFunctionByP2PID(functionNamespace, functionName, targetP2PID, c)
-			// wait until the function is ready
-			_, err := catalog.WaitDeployReadyAndReport(c.NodeCatalog[targetP2PID].Clientset, functionNamespace, functionName)
-			if err != nil {
-				log.Printf("[Deploy] error deploying %s, error: %s\n", functionName, err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+				log.Printf("The trigger node may not have function yet: %v\n", err.Error())
+				// deploy on local if no available tr
+				deployFunctionByP2PID(functionNamespace, functionName, targetP2PID, c)
+				// wait until the function is ready
+				_, err := catalog.WaitDeployReadyAndReport(c.NodeCatalog[targetP2PID].Clientset, functionNamespace, functionName)
+				if err != nil {
+					log.Printf("[Deploy] error deploying %s, error: %s\n", functionName, err)
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 			}
 		}
 		// trigger the function here
-		// if non local than change the resolver
 		markAsOffloadRequest(r)
 		offloadRequest(w, r, config, c.NodeCatalog[targetP2PID].InvokeResolver, c.NodeCatalog[targetP2PID].FunctionExecutionTime)
 
@@ -92,22 +86,23 @@ func isOffloadRequest(r *http.Request) bool {
 func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalog.Node) (string, error) {
 
 	// var choices []*weightedrand.Chooser[T, W]
-	var execTimeProd int64 = 1
-	p2pIDExecTimeMapping := make(map[string]int64)
+	var execTimeProd uint64 = 1
+	p2pIDExecTimeMapping := make(map[string]uint64)
 	for p2pID, node := range NodeCatalog {
-		// skip the overload node
-		if node.Overload {
-			continue
-		}
 		if replicas, exist := node.AvailableFunctionsReplicas[functionName]; exist && replicas > 0 {
 			// no execTime record yet, just gave one (in fact it already init as 1)
 			// execTime := time.Duration(1)
 			// if t, exist := node.FunctionExecutionTime[functionName]; exist {
 			// execTime = t
-			execTimeRaw := node.FunctionExecutionTime[functionName].Load()
+			execTimeRaw := uint64(node.FunctionExecutionTime[functionName].Load())
 			// do power in int
 			execTime := execTimeRaw
-			for i := 1; i < weightRRfactory; i++ {
+			factory := weightRRfactory
+			if node.Overload {
+				// gave the extra penalty if the target node is overload
+				factory += overloadPenaltyFactory
+			}
+			for i := 1; i < factory; i++ {
 				execTime *= execTimeRaw
 			}
 			execTimeProd *= execTime
@@ -118,10 +113,10 @@ func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalo
 
 	// all the node with funtion is overload
 	if len(p2pIDExecTimeMapping) == 0 {
-		return "", fmt.Errorf("no non-overloaded node to execution function: %s", functionName)
+		return "", fmt.Errorf("no node to execution function: %s", functionName)
 	}
 
-	choices := make([]weightedrand.Choice[string, int64], 0)
+	choices := make([]weightedrand.Choice[string, uint64], 0)
 	// rightProd := make([]time.Duration, len(leftProd))
 	// rightProd[len(leftProd)-1] = 1
 	// for i := len(execTimeList) - 1; i >= 0; i-- {
@@ -148,9 +143,9 @@ func findSuitableNode(functionName string, c catalog.Catalog) (string, error) {
 	p2pID, err := weightExecTimeScheduler(functionName, c.NodeCatalog)
 	// if can not found the suitable node to execute function, report the first non-overload node
 	if err != nil {
-		for p2pID, node := range c.NodeCatalog {
-			if !node.Overload {
-				return p2pID, nil
+		for _, p2pID := range *c.SortedP2PID {
+			if !c.NodeCatalog[p2pID].Overload {
+				return p2pID, err
 			}
 		}
 	}
