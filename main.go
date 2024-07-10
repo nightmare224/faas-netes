@@ -198,9 +198,9 @@ func initSelfCatagory(c catalog.Catalog, functionNamespace string) *catalog.Node
 	for i, fn := range fns {
 		// TODO: should be more sphofisticate
 		c.FunctionCatalog[fn.Name] = &fns[i]
-		c.NodeCatalog[catalog.GetSelfCatalogKey()].AvailableFunctionsReplicas[fn.Name] = fn.AvailableReplicas
 		c.NodeCatalog[catalog.GetSelfCatalogKey()].FunctionExecutionTime[fn.Name] = new(atomic.Int64)
 		c.NodeCatalog[catalog.GetSelfCatalogKey()].FunctionExecutionTime[fn.Name].Store(1)
+		c.NodeCatalog[catalog.GetSelfCatalogKey()].AvailableFunctionsReplicas[fn.Name] = fn.AvailableReplicas
 	}
 
 	return c.NodeCatalog[catalog.GetSelfCatalogKey()]

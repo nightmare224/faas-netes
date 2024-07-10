@@ -15,9 +15,9 @@ import (
 )
 
 func (node *Node) addAvailableFunctions(functionStatus types.FunctionStatus) {
-	node.AvailableFunctionsReplicas[functionStatus.Name] = functionStatus.AvailableReplicas
 	node.FunctionExecutionTime[functionStatus.Name] = new(atomic.Int64)
 	node.FunctionExecutionTime[functionStatus.Name].Store(1)
+	node.AvailableFunctionsReplicas[functionStatus.Name] = functionStatus.AvailableReplicas
 }
 
 func (node *Node) updateAvailableFunctions(functionStatus types.FunctionStatus) {

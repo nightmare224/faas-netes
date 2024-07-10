@@ -129,9 +129,20 @@ func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalo
 		choices = append(choices, weightedrand.NewChoice(p2pID, probability))
 		// log.Printf("exec time map %s: %d (probability: %d)\n", p2pID, execTime, probability)
 	}
-	chooser, _ := weightedrand.NewChooser(
+	chooser, errChoose := weightedrand.NewChooser(
 		choices...,
 	)
+	if errChoose != nil {
+		log.Println("error when making choice, maybe due to overflow")
+		for _, node := range NodeCatalog {
+			if replicas, exist := node.AvailableFunctionsReplicas[functionName]; exist && replicas > 0 {
+				// reset
+				node.FunctionExecutionTime[functionName].Store(1)
+			}
+		}
+		// return itself for error handle
+		return catalog.GetSelfCatalogKey(), nil
+	}
 
 	return chooser.Pick(), nil
 }

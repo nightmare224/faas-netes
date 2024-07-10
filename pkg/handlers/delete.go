@@ -77,6 +77,8 @@ func MakeDeleteHandler(defaultNamespace string, clientset *kubernetes.Clientset,
 		}
 
 		if isFunction(deployment) {
+			// update the catalog (report before delete)
+			c.DeleteAvailableFunctions(request.FunctionName)
 			err := deleteFunction(lookupNamespace, clientset, request)
 			if err != nil {
 				if errors.IsNotFound(err) {
@@ -93,9 +95,6 @@ func MakeDeleteHandler(defaultNamespace string, clientset *kubernetes.Clientset,
 			w.Write([]byte("Not a function: " + request.FunctionName))
 			return
 		}
-
-		// update the catalog
-		c.DeleteAvailableFunctions(request.FunctionName)
 
 		w.WriteHeader(http.StatusAccepted)
 	}
