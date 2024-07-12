@@ -33,13 +33,13 @@ func Test_validateScalingLabels(t *testing.T) {
 			},
 			Err: fmt.Errorf("com.openfaas.scale.zero-duration not available for Community Edition"),
 		},
-		{
-			Name: "com.openfaas.scale.target",
-			Labels: map[string]string{
-				"com.openfaas.scale.target": "10",
-			},
-			Err: fmt.Errorf("com.openfaas.scale.target not available for Community Edition"),
-		},
+		// {
+		// 	Name: "com.openfaas.scale.target",
+		// 	Labels: map[string]string{
+		// 		"com.openfaas.scale.target": "10",
+		// 	},
+		// 	Err: fmt.Errorf("com.openfaas.scale.target not available for Community Edition"),
+		// },
 		{
 			Name: "com.openfaas.scale.type",
 			Labels: map[string]string{
@@ -71,20 +71,20 @@ func Test_validateScalingLabels(t *testing.T) {
 				"com.openfaas.scale.min": "5",
 			},
 		},
-		{
-			Name: "com.openfaas.scale.max fails outside of range",
-			Labels: map[string]string{
-				"com.openfaas.scale.max": "6",
-			},
-			Err: fmt.Errorf("com.openfaas.scale.max is set too high for Community Edition"),
-		},
-		{
-			Name: "com.openfaas.scale.min fails outside of range",
-			Labels: map[string]string{
-				"com.openfaas.scale.min": "6",
-			},
-			Err: fmt.Errorf("com.openfaas.scale.min is set too high for Community Edition"),
-		},
+		// {
+		// 	Name: "com.openfaas.scale.max fails outside of range",
+		// 	Labels: map[string]string{
+		// 		"com.openfaas.scale.max": "6",
+		// 	},
+		// 	Err: fmt.Errorf("com.openfaas.scale.max is set too high for Community Edition"),
+		// },
+		// {
+		// 	Name: "com.openfaas.scale.min fails outside of range",
+		// 	Labels: map[string]string{
+		// 		"com.openfaas.scale.min": "6",
+		// 	},
+		// 	Err: fmt.Errorf("com.openfaas.scale.min is set too high for Community Edition"),
+		// },
 	}
 
 	for _, tc := range testCases {

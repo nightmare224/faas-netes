@@ -16,7 +16,7 @@ import (
 
 // MaxReplicas licensed for OpenFaaS CE is 5/5
 // a license for OpenFaaS Standard is required to increase this limit.
-const MaxReplicas = 5
+const MaxReplicas = 10
 
 // MaxFunctions licensed for OpenFaaS CE is 15
 // a license for OpenFaaS Standard is required to increase this limit.
