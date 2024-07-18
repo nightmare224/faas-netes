@@ -219,11 +219,13 @@ func scaleDown(functionName string, functionNamespace string, desiredReplicas in
 	scaleDownCnt := int32(c.FunctionCatalog[functionName].Replicas) - desiredReplicas
 
 	// if the offload is not enable, means that the localhost is the only choose, so the length is 1
+	// ! always set to 1, as we want only scale down in its own unit, as we don't know the gateway status of other node
 	numNode := 1
-	if catalog.EnabledOffload {
-		numNode = len(*c.SortedP2PID)
-	}
-	// try scale up the function from near to far (take care of itself first)
+	// if catalog.EnabledOffload {
+	// 	numNode = len(*c.SortedP2PID)
+	// }
+
+	// try scale down the function from near to far (take care of itself first)
 	for i := 0; i < numNode && scaleDownCnt > 0; i++ {
 		p2pID := (*c.SortedP2PID)[i]
 		availableFunctionsReplicas := int32(c.NodeCatalog[p2pID].AvailableFunctionsReplicas[functionName])

@@ -250,6 +250,24 @@ func makeDeploymentSpec(request types.FunctionDeployment, existingSecrets map[st
 								},
 							},
 						},
+						NodeAffinity: &corev1.NodeAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+								{
+									Weight: 1,
+									Preference: corev1.NodeSelectorTerm{
+										MatchExpressions: []corev1.NodeSelectorRequirement{
+											{
+												Key:      "node-role.kubernetes.io/master",
+												Operator: corev1.NodeSelectorOpIn,
+												Values: []string{
+													"true",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
 					},
 				},
 			},
