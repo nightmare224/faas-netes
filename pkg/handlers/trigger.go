@@ -21,8 +21,8 @@ import (
 )
 
 // The factory that affect the weighted round robin (exponential)
-const weightRRfactory = 2
-const overloadPenaltyFactory = 2
+const weightRRfactory = 4
+const overloadPenaltyFactory = 4
 
 // Make this able to search for other cluster's function.
 // And if other cluster exist the function, them deploy it on current local one
