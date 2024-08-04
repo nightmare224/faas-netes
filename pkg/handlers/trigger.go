@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -60,16 +61,24 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c cat
 					return
 				}
 			}
+			defer func() {
+				potentailP2PID, err := explorePotentialNode(targetP2PID, functionName, c)
+				if err != nil {
+					return
+				}
+				go deployFunctionByP2PID(functionNamespace, functionName, potentailP2PID, c)
+			}()
 		}
 		// trigger the function here
 		markAsOffloadRequest(r)
 		offloadRequest(w, r, config, c.NodeCatalog[targetP2PID].InvokeResolver, c.NodeCatalog[targetP2PID].FunctionExecutionTime)
 
 		// create a replica at the trigger point
-		if replicas, exist := c.NodeCatalog[catalog.GetSelfCatalogKey()].AvailableFunctionsReplicas[functionName]; !exist || replicas == 0 {
-			// log.Printf("Try to deploy on current instance\n")
-			go deployFunctionByP2PID(functionNamespace, functionName, catalog.GetSelfCatalogKey(), c)
-		}
+		// if replicas, exist := c.NodeCatalog[catalog.GetSelfCatalogKey()].AvailableFunctionsReplicas[functionName]; !exist || replicas == 0 {
+		// 	// log.Printf("Try to deploy on current instance\n")
+		// 	go deployFunctionByP2PID(functionNamespace, functionName, catalog.GetSelfCatalogKey(), c)
+		// }
+
 	}
 }
 func markAsOffloadRequest(r *http.Request) {
@@ -82,33 +91,66 @@ func isOffloadRequest(r *http.Request) bool {
 	return offload == "1"
 }
 
-// return the select p2pid to execution function based on last weighted exec time
-func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalog.Node) (string, error) {
-
-	// var choices []*weightedrand.Chooser[T, W]
-	var execTimeProd uint64 = 1
-	p2pIDExecTimeMapping := make(map[string]uint64)
-	for p2pID, node := range NodeCatalog {
-		if replicas, exist := node.AvailableFunctionsReplicas[functionName]; exist && replicas > 0 {
-			// no execTime record yet, just gave one (in fact it already init as 1)
-			// execTime := time.Duration(1)
-			// if t, exist := node.FunctionExecutionTime[functionName]; exist {
-			// execTime = t
-			execTimeRaw := uint64(node.FunctionExecutionTime[functionName].Load())
-			// do power in int
-			execTime := execTimeRaw
-			factory := weightRRfactory
-			if node.Overload {
-				// gave the extra penalty if the target node is overload
-				factory += overloadPenaltyFactory
+func explorePotentialNode(targetP2PID string, functionName string, c catalog.Catalog) (string, error) {
+	currExecTime := c.NodeCatalog[targetP2PID].FunctionExecutionTime[functionName].Load()
+	potentialP2PID := ""
+	for _, p2pID := range *c.SortedP2PID {
+		// if nodeCatalog
+		node := c.NodeCatalog[p2pID]
+		if replicas, exist := node.AvailableFunctionsReplicas[functionName]; !exist || replicas == 0 {
+			if _, exist := node.FunctionExecutionTime[functionName]; exist {
+				execTime := node.FunctionExecutionTime[functionName].Load()
+				if execTime < currExecTime {
+					return p2pID, nil
+				}
+				// log.Printf("p2pID: %s, execTime: %d, currExecTime: %d\n", p2pID, execTime, currExecTime)
+			} else if potentialP2PID == "" {
+				potentialP2PID = p2pID
 			}
-			for i := 1; i < factory; i++ {
-				execTime *= execTimeRaw
-			}
-			execTimeProd *= execTime
-			p2pIDExecTimeMapping[p2pID] = execTime
 		}
-		// log.Printf("p2pIDExecTimeMapping: %v\n", p2pIDExecTimeMapping)
+	}
+	if potentialP2PID == "" {
+		return "", fmt.Errorf("no potential node for function: %s", functionName)
+	}
+	return potentialP2PID, nil
+}
+
+// return the select p2pid to execution function based on last weighted exec time
+func weightExecTimeScheduler(functionName string, nodeCatalog map[string]*catalog.Node) (string, error) {
+
+	var execTimeProd float64 = 1
+	var execTimeMin float64 = math.MaxFloat64
+	p2pIDExecTimeRawMapping := make(map[string]float64)
+	for p2pID, node := range nodeCatalog {
+
+		if replicas, exist := node.AvailableFunctionsReplicas[functionName]; exist && replicas > 0 {
+			execTimeRaw := float64(node.FunctionExecutionTime[functionName].Load())
+			if execTimeRaw == 1 {
+				// log.Printf("Host %s has exectime = 1\n", p2pID)
+				return p2pID, nil
+			}
+			if execTimeRaw < execTimeMin {
+				execTimeMin = execTimeRaw
+			}
+			p2pIDExecTimeRawMapping[p2pID] = execTimeRaw
+		}
+	}
+	// log.Printf("Minimal: %f\np2pIDExecTimeRawMapping: %v\n", execTimeMin, p2pIDExecTimeRawMapping)
+
+	p2pIDExecTimeMapping := make(map[string]float64)
+	for p2pID, execTimeRaw := range p2pIDExecTimeRawMapping {
+		execTime := float64(execTimeRaw) / float64(execTimeMin)
+		factory := weightRRfactory
+		if nodeCatalog[p2pID].Overload {
+			// gave the extra penalty if the target node is overload
+			factory += overloadPenaltyFactory
+		}
+		execTimeWeighted := execTime
+		for i := 1; i < factory; i++ {
+			execTimeWeighted *= execTime
+		}
+		execTimeProd *= execTimeWeighted
+		p2pIDExecTimeMapping[p2pID] = execTimeWeighted
 	}
 
 	// all the node with funtion is overload
@@ -117,24 +159,18 @@ func weightExecTimeScheduler(functionName string, NodeCatalog map[string]*catalo
 	}
 
 	choices := make([]weightedrand.Choice[string, uint64], 0)
-	// rightProd := make([]time.Duration, len(leftProd))
-	// rightProd[len(leftProd)-1] = 1
-	// for i := len(execTimeList) - 1; i >= 0; i-- {
-	// 	choices = append(choices, weightedrand.NewChoice(p2pIDList[i], rightProd[i]*leftProd[i]))
-	// 	rightProd[i-1] = rightProd[i] * execTimeList[i]
-	// }
 
 	for p2pID, execTime := range p2pIDExecTimeMapping {
-		probability := execTimeProd / execTime
+		probability := uint64(execTimeProd / execTime * 10)
 		choices = append(choices, weightedrand.NewChoice(p2pID, probability))
-		// log.Printf("exec time map %s: %d (probability: %d)\n", p2pID, execTime, probability)
+		// fmt.Printf("exec time map %s: %f (probability: %d)\n", p2pID, p2pIDExecTimeRawMapping[p2pID], probability)
 	}
 	chooser, errChoose := weightedrand.NewChooser(
 		choices...,
 	)
 	if errChoose != nil {
 		log.Println("error when making choice, maybe due to overflow")
-		for _, node := range NodeCatalog {
+		for _, node := range nodeCatalog {
 			if replicas, exist := node.AvailableFunctionsReplicas[functionName]; exist && replicas > 0 {
 				// reset
 				node.FunctionExecutionTime[functionName].Store(1)

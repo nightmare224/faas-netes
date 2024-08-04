@@ -131,16 +131,23 @@ func unpackNodeInfoMsg(c Catalog, infoMsg *NodeInfoMsg, infoRoomName string) {
 	// reocrd available replicate and update functionCatalog
 	updateReplicas := make(map[string]uint64)
 	for i, fn := range infoMsg.AvailableFunctions {
-		// init exec time record
-		if _, exist := node.AvailableFunctionsReplicas[fn.Name]; !exist {
+
+		// create a new FunctionExecutionTime entry if not exist yet but need now (new replica)
+		if _, exist := node.FunctionExecutionTime[fn.Name]; !exist && fn.AvailableReplicas > 0 {
 			node.FunctionExecutionTime[fn.Name] = new(atomic.Int64)
+			node.FunctionExecutionTime[fn.Name].Store(1)
 		}
-		node.FunctionExecutionTime[fn.Name].Store(1)
-		updateReplicas[fn.Name] = fn.AvailableReplicas
+		// reset the execTime to give a new change when there are new add replica
+		if replica, exist := node.AvailableFunctionsReplicas[fn.Name]; !exist || (exist && (replica < fn.AvailableReplicas)) {
+			node.FunctionExecutionTime[fn.Name].Store(1)
+		}
+
 		// add to function Catalog if it is new function
 		if _, exist := c.FunctionCatalog[fn.Name]; !exist {
 			c.FunctionCatalog[fn.Name] = &infoMsg.AvailableFunctions[i]
 		}
+
+		updateReplicas[fn.Name] = fn.AvailableReplicas
 	}
 	// delete unused exec time
 	// for fname, _ := range node.AvailableFunctionsReplicas {

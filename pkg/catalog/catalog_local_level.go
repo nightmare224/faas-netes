@@ -26,7 +26,7 @@ func (node *Node) updateAvailableFunctions(functionStatus types.FunctionStatus) 
 
 func (node *Node) deleteAvailableFunctions(functionName string) {
 	delete(node.AvailableFunctionsReplicas, functionName)
-	delete(node.FunctionExecutionTime, functionName)
+	// delete(node.FunctionExecutionTime, functionName)
 }
 
 func (node *Node) ListenUpdateInfo(clientProm *promv1.API) {
