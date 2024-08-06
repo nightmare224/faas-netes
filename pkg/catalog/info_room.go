@@ -138,7 +138,7 @@ func unpackNodeInfoMsg(c Catalog, infoMsg *NodeInfoMsg, infoRoomName string) {
 			node.FunctionExecutionTime[fn.Name].Store(1)
 		}
 		// reset the execTime to give a new change when there are new add replica
-		if replica, exist := node.AvailableFunctionsReplicas[fn.Name]; !exist || (exist && (replica < fn.AvailableReplicas)) {
+		if replica, exist := node.AvailableFunctionsReplicas[fn.Name]; (!exist && fn.AvailableReplicas > 0) || (exist && replica < fn.AvailableReplicas) {
 			node.FunctionExecutionTime[fn.Name].Store(1)
 		}
 
