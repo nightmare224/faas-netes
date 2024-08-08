@@ -286,7 +286,16 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		}
 		// does the update too often?
 		// just store milliseconds
-		functionExecutionTime[actualFunctionName].Store(int64(nanoseconds / 1000000))
+		tmpTime := functionExecutionTime[actualFunctionName].Load()
+		// initial
+		if tmpTime == 1 {
+			tmpTime = int64(nanoseconds / 1000000)
+		} else {
+			// moving average
+			tmpTime = (tmpTime + int64(nanoseconds/1000000)) / 2
+		}
+		// average with past
+		functionExecutionTime[actualFunctionName].Store(tmpTime)
 	}()
 
 	if v := originalReq.Header.Get("Accept"); v == "text/event-stream" {
