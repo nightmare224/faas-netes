@@ -3,7 +3,6 @@ package catalog
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"sync/atomic"
 
@@ -102,7 +101,6 @@ func (ir *InfoRoom) subscribeLoop(c Catalog, infoRoomName string) {
 			log.Printf("deserialized info message error: %s\n", err)
 			continue
 		}
-		fmt.Println("Receive info from publisher:", infoMsg)
 
 		// update the info in the node
 		// c[infoRoomName].NodeInfo = *info
@@ -149,12 +147,7 @@ func unpackNodeInfoMsg(c Catalog, infoMsg *NodeInfoMsg, infoRoomName string) {
 
 		updateReplicas[fn.Name] = fn.AvailableReplicas
 	}
-	// delete unused exec time
-	// for fname, _ := range node.AvailableFunctionsReplicas {
-	// 	if _, exist := updateReplicas[fname]; !exist {
-	// 		delete(node.FunctionExecutionTime, fname)
-	// 	}
-	// }
+
 	// update available replicate
 	node.AvailableFunctionsReplicas = updateReplicas
 

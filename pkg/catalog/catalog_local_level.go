@@ -9,8 +9,6 @@ import (
 
 	"github.com/openfaas/faas-provider/types"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
-
-	// v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
 )
 
@@ -26,7 +24,6 @@ func (node *Node) updateAvailableFunctions(functionStatus types.FunctionStatus) 
 
 func (node *Node) deleteAvailableFunctions(functionName string) {
 	delete(node.AvailableFunctionsReplicas, functionName)
-	// delete(node.FunctionExecutionTime, functionName)
 }
 
 func (node *Node) ListenUpdateInfo(clientProm *promv1.API) {
@@ -63,8 +60,7 @@ func (node *Node) updatePressure(client *promv1.API) bool {
 		return updated
 	}
 	overload_update = overload_update || (MemLoad > MemOverloadThreshold)
-	// time.Sleep(time.Second * 10)
-	// fmt.Println("The update overload: ", overload_update)
+
 	// update
 	if overload_update != node.Overload {
 		node.Overload = overload_update

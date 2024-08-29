@@ -73,12 +73,6 @@ func MakeTriggerHandler(functionNamespace string, config types.FaaSConfig, c cat
 		markAsOffloadRequest(r)
 		offloadRequest(w, r, config, c.NodeCatalog[targetP2PID].InvokeResolver, c.NodeCatalog[targetP2PID].FunctionExecutionTime)
 
-		// create a replica at the trigger point
-		// if replicas, exist := c.NodeCatalog[catalog.GetSelfCatalogKey()].AvailableFunctionsReplicas[functionName]; !exist || replicas == 0 {
-		// 	// log.Printf("Try to deploy on current instance\n")
-		// 	go deployFunctionByP2PID(functionNamespace, functionName, catalog.GetSelfCatalogKey(), c)
-		// }
-
 	}
 }
 func markAsOffloadRequest(r *http.Request) {
@@ -163,7 +157,6 @@ func weightExecTimeScheduler(functionName string, nodeCatalog map[string]*catalo
 	for p2pID, execTime := range p2pIDExecTimeMapping {
 		probability := uint64(execTimeProd / execTime * 10)
 		choices = append(choices, weightedrand.NewChoice(p2pID, probability))
-		// fmt.Printf("exec time map %s: %f (probability: %d)\n", p2pID, p2pIDExecTimeRawMapping[p2pID], probability)
 	}
 	chooser, errChoose := weightedrand.NewChooser(
 		choices...,
@@ -251,8 +244,6 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	}
 
 	functionAddr, err := resolver.Resolve(functionName)
-	// fmt.Printf("Function Address: %+v\n\n", functionAddr)
-	// fmt.Printf("Original Request: %+v\n\n", originalReq)
 	if err != nil {
 		w.Header().Add(openFaaSInternalHeader, "proxy")
 
@@ -263,7 +254,6 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	}
 
 	proxyReq, err := buildProxyRequest(originalReq, functionAddr, "/function/"+functionName)
-	// fmt.Printf("\nProxy Req: %+v\n", proxyReq)
 	if err != nil {
 
 		w.Header().Add(openFaaSInternalHeader, "proxy")
@@ -334,9 +324,6 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 func buildProxyRequest(originalReq *http.Request, baseURL url.URL, extraPath string) (*http.Request, error) {
 
 	host := baseURL.Host
-	// if baseURL.Port() == "" {
-	// 	host = baseURL.Host + ":" + watchdogPort
-	// }
 
 	url := url.URL{
 		Scheme:   baseURL.Scheme,

@@ -37,32 +37,3 @@ func MakeHealthHandler(node *catalog.Node) http.HandlerFunc {
 		w.Write(jsonOut)
 	}
 }
-
-// func GetExertnalPressure(resolver proxy.BaseURLResolver) (bool, error) {
-
-// 	hostUrl, err := resolver.Resolve("")
-// 	if err != nil {
-// 		err := fmt.Errorf("unable to resolve remote host: %v", err)
-// 		return false, err
-// 	}
-// 	healthzUrl := fmt.Sprintf("%s/healthz?overload=1", hostUrl.String())
-// 	resp, err := http.Get(healthzUrl)
-// 	if err != nil {
-// 		err := fmt.Errorf("unable to get health: %v", err)
-// 		return false, err
-// 	}
-// 	defer resp.Body.Close()
-
-// 	// defer upstreamCall.Body.Close()
-
-// 	var health = CustomHealth{Overload: false}
-
-// 	body, _ := io.ReadAll(resp.Body)
-// 	err = json.Unmarshal(body, &health)
-// 	if err != nil {
-// 		log.Printf("Error unmarshalling provider json from body %s. Error %s\n", body, err.Error())
-// 	}
-
-// 	return health.Overload, nil
-
-// }

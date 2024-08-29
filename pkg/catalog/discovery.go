@@ -34,11 +34,6 @@ type faasNotifiee struct {
 	candidate map[string]string
 }
 
-// type faasNotifiee struct {
-// 	h host.Host
-// 	c Catalog
-// }
-
 func setupDiscovery(h host.Host, ps *pubsub.PubSub, c Catalog) error {
 	// setup mDNS discovery to find local peers
 	switch mode {
@@ -133,10 +128,6 @@ func (n *faasNotifiee) HandlePeerFound(pi peer.AddrInfo) {
 
 }
 
-// func InitAvailableFunctions(host host.Host, peerID peer.ID) {
-// 	host.NewStream()
-// }
-
 func readIDFromPubKey(filepath string) peer.ID {
 	pubKeyData, err := os.ReadFile(filepath)
 	if err != nil {
@@ -167,7 +158,6 @@ func (n *faasNotifiee) ListenClose(network network.Network, maddr ma.Multiaddr) 
 
 // send the initial available function if the new peer join
 func (n *faasNotifiee) Connected(network network.Network, conn network.Conn) {
-	// fmt.Println("Peer store:", n.h.Peerstore().Peers())
 
 	remotePeer := conn.RemotePeer()
 	log.Printf("Peer Connected: %s\n", remotePeer)

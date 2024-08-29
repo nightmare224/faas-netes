@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"context"
-	"fmt"
 	"io/fs"
 	"log"
 	"net"
@@ -66,12 +65,10 @@ func NewKubeConfig(kubeconfigPath string) ([]*rest.Config, error) {
 			if err != nil {
 				log.Fatalf("Error building kubeconfig: %s", err.Error())
 			}
-			fmt.Println("cluster ID: ", getClusterIdentifier(config))
 			clusterID := getClusterIdentifier(config)
 			if _, exists := clusterIDSet[clusterID]; !exists {
 				clusterIDSet[clusterID] = struct{}{}
 				clientCmdConfigs = append(clientCmdConfigs, config)
-				fmt.Printf("Host: %s, APIPath: %s\n", clientCmdConfigs[len(clientCmdConfigs)-1].Host, clientCmdConfigs[len(clientCmdConfigs)-1].APIPath)
 			}
 		}
 		return nil
@@ -172,7 +169,6 @@ func (c Catalog) RankNodeByRTT() {
 			url, _ := p2pNode.InvokeResolver.Resolve("")
 			ip, _, _ := net.SplitHostPort(url.Host)
 			// just try connect with the k8s api
-			// TODO: should try to connect with different port
 			conn, err := net.DialTimeout("tcp", ip+":22", 5*time.Second)
 			rtt = time.Since(startTime)
 			if err != nil {
@@ -184,8 +180,6 @@ func (c Catalog) RankNodeByRTT() {
 		RTTtoP2PID[rtt] = p2pID
 		RTTs = append(RTTs, rtt)
 	}
-	log.Printf("RTTtoP2PID: %v\n", RTTtoP2PID)
-	// log.Printf("Rtts: %v, cap of sortedp2pid map: %d\n", RTTs, cap(c.SortedP2PID))
 	slices.Sort(RTTs)
 
 	// make the length fit with the number of node

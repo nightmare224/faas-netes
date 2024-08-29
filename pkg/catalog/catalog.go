@@ -27,10 +27,6 @@ const (
 	MemOverloadThreshold = 0.80
 )
 
-// key is the peer ID in string
-// type NodeCatalog map[string]*Node
-// type FunctionCatalog map[string]types.FunctionStatus
-
 type Catalog struct {
 	// to prevent reinsert for modify Node by using pointer
 	NodeCatalog         map[string]*Node
@@ -40,7 +36,6 @@ type Catalog struct {
 }
 
 type NodeInfo struct {
-	// FunctionExecutionTime      map[string]time.Duration
 	FunctionExecutionTime      map[string]*atomic.Int64
 	AvailableFunctionsReplicas map[string]uint64
 	Overload                   bool
@@ -63,20 +58,9 @@ type Node struct {
 	infoChan chan *NodeInfo
 }
 
-// type FunctionReplicas struct {
-// 	functionStatus    map[string]types.FunctionStatus
-// 	availableReplicas []map[string]uint64
-// }
-
 func GetSelfCatalogKey() string {
 	return selfCatagoryKey
 }
-
-// func (c Catalog) InitAvailableFunctions(fns []types.FunctionStatus) {
-// 	c[selfCatagoryKey].AvailableFunctions = fns
-
-// publishInfo(c[selfCatagoryKey].infoChan, &c[selfCatagoryKey].NodeInfo)
-// }
 
 func NewCatalog(newKubeClientWithIp NewKubeClientWithIpFunc) Catalog {
 	sortedP2PID := make([]string, 0, totalAmountP2PPeer())
